@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+.cache/
+.env
+.env.local
+.vite/
+vite.config.*.timestamp-*
+*.tsbuildinfo
+*-debug.log*
+logs/
+*.log
+.claude-replay.*
+.tmp-*
+/.figma/design-context/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+venv/
+.venv/
+backend/venv/
+staticfiles/
+media/
+
+# Platform-managed agentplat state
+/.plugins/
+/.opencode-skills/

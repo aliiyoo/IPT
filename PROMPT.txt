@@ -1,0 +1,194 @@
+# PROJECT BRIEF — Pink Digital Storefront (Digital E-Commerce Prototype)
+
+Read PLATFORM.txt in the project root first. Then inspect the Figma Make
+export already extracted in this folder (package.json, src/, etc.).
+Also reference the Figma link below for design intent.
+
+Figma: https://www.figma.com/make/qcJonPuuNezlSJ9j6xeLMj/Pink-Digital-Storefront
+
+## GOAL
+Build a working full-stack digital e-commerce prototype. Products are
+DIGITAL (game keys, gift cards, software licenses) — no shipping, no
+physical inventory. Delivery is by email. Must satisfy the course
+requirements in PLATFORM.txt, including at least 2 working integrated
+APIs (PayMongo + Brevo) and a written explanation of how each API works.
+
+## STACK (non-negotiable)
+- Frontend: Next.js (App Router) + TypeScript + Tailwind CSS
+  - If the Figma export is already Next.js, keep it.
+  - If it's Vite/React, MOVE it into frontend/ and convert pages to
+    Next.js App Router, reusing the exported components and styles.
+- Backend: Python 3.11+ + Django 5 + Django REST Framework
+- Database: PostgreSQL (use .env for credentials; include a
+  docker-compose.yml so Postgres can run locally without manual install)
+- Payments: PayMongo Checkout Session API — TEST MODE
+- Email: Brevo Transactional Email API v3
+- Auth: Django session or JWT (your call, but document it)
+
+## REPO LAYOUT (propose and confirm before building)
+/
+├── frontend/        # Next.js app
+├── backend/         # Django project + apps
+├── docker-compose.yml
+├── README.md        # setup steps
+└── API_FLOW.md      # required API explanation deliverable
+
+## DATA MODELS (Django)
+- Vendor: name, slug, description, logo, is_active
+- Category: name, slug
+- Product: vendor FK, category FK, name, slug, description, base_price,
+  is_digital=true, cover_image, is_active
+- ProductVariant: product FK, sku, attributes (JSON: platform/region/
+  edition/term/denomination), price, stock_count
+- DigitalKey: variant FK, code (unique), status (available/assigned/
+  revealed/refunded), assigned_order_item FK (nullable)
+- Order: customer FK, status (pending/paid/fulfilled/refunded/cancelled),
+  total, paymongo_session_id, created_at
+- OrderItem: order FK, variant FK, quantity, unit_price, snapshot_name
+- Fulfillment: order_item FK, digital_key FK, email_sent_at, brevo_message_id
+- RefundRequest: order_item FK, reason, status (requested/approved/
+  rejected/refunded), paymongo_refund_id, created_at
+- Profile: user FK, role (customer/vendor), vendor FK (nullable)
+
+## API ENDPOINTS (DRF, /api/...)
+Public:
+- GET  /api/products/                 list + filter by vendor/category/search
+- GET  /api/products/{slug}/          detail with variants
+- GET  /api/vendors/                  list vendors
+- GET  /api/vendors/{slug}/           vendor storefront
+Auth:
+- POST /api/auth/register/
+- POST /api/auth/login/
+Customer:
+- POST /api/cart/                     add/update cart (session or DB)
+- POST /api/checkout/                 create PayMongo Checkout Session
+- GET  /api/orders/                   my orders
+- GET  /api/orders/{id}/              order detail + assigned keys (masked
+                                      until paid, revealed after fulfillment)
+- POST /api/orders/{id}/refund/       submit refund request
+Vendor (Seller Center):
+- GET  /api/vendor/products/
+- POST /api/vendor/products/
+- PUT  /api/vendor/products/{id}/
+- GET  /api/vendor/orders/
+- GET  /api/vendor/sales/
+Webhooks:
+- POST /api/webhooks/paymongo/        verify signature, mark order paid,
+                                      trigger fulfillment + Brevo email
+
+## EXTERNAL API INTEGRATION — MUST ACTUALLY WORK
+
+### 1. PayMongo (test mode)
+- Use Checkout Session API: POST https://api.paymongo.com/v1/checkout_sessions
+  with Basic auth (secret key from .env). line_items built from the cart.
+- On success, PayMongo redirects to success_url and calls the webhook.
+- Webhook handler MUST verify the Paymongo-Signature header before
+  trusting the payload. On paid event: set order.status='paid', allocate
+  an available DigitalKey per item, set Fulfillment rows, then call Brevo.
+- Refund: on approved RefundRequest, call PayMongo Refund API
+  (POST /v1/payments/{payment_id}/refunds), mark keys refunded/restocked.
+- All keys stay in .env — never hardcode.
+
+### 2. Brevo (transactional email)
+- After payment is confirmed and keys are allocated, send one email per
+  order via POST https://api.brevo.com/v3/smtp/email with:
+  to = customer email, subject = "Your digital keys — Order #<id>",
+  htmlContent = order summary + the digital keys.
+- Store the returned messageId in Fulfillment.brevo_message_id.
+- Also send a vendor notification email when a sale occurs.
+- Use a simple HTML template. Read BREVO_API_KEY from .env.
+
+## DIGITAL-GOODS LIFECYCLE (implement this exact flow)
+1. Customer selects a variant → backend checks stock_count > 0.
+2. Customer clicks Checkout → frontend POSTs /api/checkout/ → backend
+   creates Order(status=pending) and a PayMongo Checkout Session, returns
+   the checkout_url → frontend redirects.
+3. Customer pays with a test card/GCash/Maya → PayMongo webhook fires →
+   backend verifies signature → Order.status='paid' → allocate one
+   available DigitalKey per item → create Fulfillment rows → call Brevo.
+4. Customer lands on success page → sees order summary, gets email with
+   the keys → keys can be revealed on the order detail page.
+5. Return/Refund: customer files refund request within 24h if the key
+   was never revealed → vendor/admin approves in Seller Center →
+   backend calls PayMongo Refund API → mark keys refunded → order
+   status='refunded'.
+
+## SCREENS (build all of these)
+Required by PLATFORM.txt:
+- Landing Page — nav with search bar, cart icon + count, notification bell
+- Log In (username + password)
+- Sign Up
+- Seller Center (vendor dashboard: products, orders, sales)
+Add (needed for the flow):
+- Product Listing (grid, filter by vendor/category)
+- Product Detail (variant selector, price updates, Add to Cart)
+- Cart
+- Checkout (order summary → Redirect to PayMongo)
+- Order Success / order detail with key reveal
+- My Orders
+- Refund Request modal/page
+
+Use the Figma export's layout, colors, and typography as the base. If a
+screen doesn't exist in Figma, follow the same visual language.
+
+## SEED DATA (management command: `python manage.py seed`)
+Create 3 vendors, 5 products each, with real variation sets:
+
+Vendor 1 — GameHub Digital (game keys)
+- Minecraft Digital Edition — platform: PC / PS5 / Xbox / Switch
+- Stardew Valley — platform: PC / Switch / PS5
+- Animal Crossing: New Horizons — platform: Switch
+- Hollow Knight — platform: PC / PS5 / Xbox / Switch
+- Overcooked! 2 — platform: PC / PS5 / Xbox / Switch
+
+Vendor 2 — TopUp Central (gift cards)
+- Nintendo eShop Gift Card — region: US / EU / JP × value: $10 / $25 / $50
+- Xbox Gift Card — region: US / EU × $10 / $25 / $50
+- PlayStation Store Gift Card — region: US / EU / Asia × $10 / $25 / $50
+- Steam Wallet Code — region: US / EU / Asia × $5 / $10 / $20 / $50
+- Google Play Gift Card — region: US / PH × ₱100 / ₱300 / ₱500 / $10
+
+Vendor 3 — CodeVault Software (software licenses)
+- Windows 11 Pro — edition: Home / Pro
+- Microsoft Office 2021 — edition: Home & Student / Professional
+- Kaspersky Antivirus — term: 1 year / 2 years × devices: 1 / 3 / 5
+- Adobe Creative Cloud — term: 1 month / 1 year
+- NordVPN — term: 1 month / 1 year / 2 years
+
+Each variant gets 10–20 generated DigitalKeys (random readable codes)
+so the flow can be demoed end-to-end. Create 1 demo customer, 1 demo
+vendor account per vendor, and 1 superuser.
+
+## DELIVERABLES
+1. A working prototype: log in → browse → add to cart → PayMongo test
+   payment → webhook → keys emailed via Brevo → refund request → refund.
+2. API_FLOW.md — a written explanation with a diagram (ASCII is fine)
+   showing exactly how PayMongo and Brevo are incorporated:
+   - endpoint called
+   - auth method
+   - request payload
+   - when in the lifecycle it fires
+   - what the response/webhook does
+   This must be detailed enough to defend in class.
+3. README.md — setup steps (docker compose up, migrate, seed, runserver,
+   npm run dev), and the list of .env variables required.
+
+## EXECUTION RULES
+- Do NOT write code yet. First reply with:
+  (a) what stack the Figma export actually uses,
+  (b) whether to keep it or convert,
+  (c) final repo layout,
+  (d) the phase-by-phase build order,
+  (e) any blockers (Python version, Postgres, missing keys).
+- After I approve the plan, build in phases:
+  Phase 1: repo + docker-compose + Django skeleton + models + migrations
+  Phase 2: DRF endpoints + seed command
+  Phase 3: PayMongo checkout + webhook + refund
+  Phase 4: Brevo email on fulfillment
+  Phase 5: Next.js pages wired to the API
+  Phase 6: Seller Center
+  Phase 7: API_FLOW.md + README.md
+- Stop after each phase and report what changed. Do not skip ahead.
+- Never hardcode secrets. Always read from .env.
+- If a dependency is missing on this machine, tell me the exact install
+  command instead of pretending it worked.

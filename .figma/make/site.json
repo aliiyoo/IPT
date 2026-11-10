@@ -1,0 +1,10 @@
+{
+  "description": "Shop digital game copies across platforms from GameHub Digital, with secure checkout and email delivery of digital keys for a convenient buying experience.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
