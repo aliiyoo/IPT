@@ -3,6 +3,8 @@ import logging
 from decimal import Decimal
 from django.db import transaction
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from rest_framework import generics, permissions, status
@@ -19,12 +21,53 @@ from apps.integrations.paymongo import PayMongoClient, PayMongoError
 logger = logging.getLogger(__name__)
 
 
+def _resolve_checkout_customer(user, requested_email):
+    if user.is_authenticated:
+        customer = user
+        customer_email = (customer.email or '').strip()
+    else:
+        customer_email = str(requested_email or '').strip()
+        customer = None
+
+    if not customer_email:
+        raise ValueError('A customer email address is required.')
+
+    try:
+        validate_email(customer_email)
+    except ValidationError as exc:
+        raise ValueError('A valid customer email address is required.') from exc
+
+    if customer is None:
+        customer = User.objects.filter(email__iexact=customer_email).first()
+
+    if customer is None:
+        base_username = customer_email.split('@', 1)[0].replace('.', '_').replace('-', '_')
+        username = base_username or 'customer'
+        suffix = 1
+        while User.objects.filter(username=username).exists():
+            username = f'{base_username}{suffix}'
+            suffix += 1
+        customer = User.objects.create_user(username=username, email=customer_email)
+
+    return customer, customer_email
+
+
 class OrderListView(generics.ListAPIView):
     serializer_class = OrderListSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        return Order.objects.filter(customer=self.request.user)
+        user = self.request.user
+        email = self.request.query_params.get('email')
+        username = self.request.query_params.get('username')
+
+        if user and user.is_authenticated:
+            return Order.objects.filter(customer=user)
+        if email:
+            return Order.objects.filter(customer__email__iexact=email)
+        if username:
+            return Order.objects.filter(customer__username__iexact=username)
+        return Order.objects.none()
 
 
 class OrderDetailView(generics.RetrieveAPIView):
@@ -55,15 +98,13 @@ class CheckoutView(APIView):
         if not items_data:
             return Response({'error': 'Cart is empty.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        customer = request.user if request.user.is_authenticated else None
-        customer_email = request.data.get('email') or (customer.email if customer else 'customer@example.com')
-        customer_name = request.data.get('name') or (customer.username if customer else 'PixelPink Guest')
-
-        if not customer:
-            customer, _ = User.objects.get_or_create(
-                username=customer_email.split('@')[0],
-                defaults={'email': customer_email}
+        try:
+            customer, customer_email = _resolve_checkout_customer(
+                request.user,
+                request.data.get('email'),
             )
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         success_url = request.data.get('success_url')
         cancel_url = request.data.get('cancel_url')
@@ -211,6 +252,13 @@ class SimulatePaymentView(APIView):
             })
         except Order.DoesNotExist:
             return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.exception(f"Simulate payment error: {e}")
+            return Response({
+                'error': f"SMTP Dispatch Error: {str(e)}",
+                'error_type': type(e).__name__,
+                'order': OrderDetailSerializer(Order.objects.get(pk=pk)).data
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class RefundOrderView(APIView):

@@ -2,8 +2,9 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 from apps.store.models import DigitalKey
+from apps.store.utils import generate_random_digital_key
 from apps.orders.models import Order, Fulfillment
-from apps.integrations.brevo import BrevoClient
+from apps.integrations.email_service import send_pixelpink_fulfillment_email
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +12,12 @@ logger = logging.getLogger(__name__)
 def fulfill_order(order, paymongo_payment_id=None):
     """
     Fulfills a paid order:
-    1. Allocates available digital keys for each order item.
-    2. Updates key status to 'revealed' (or 'assigned').
-    3. Creates Fulfillment records.
+    1. Generates new unique digital keys in XXXX-XXXX-XXXX-XXXX format using
+       django.utils.crypto.get_random_string for each item.
+    2. Saves the key to DigitalKey model with status='revealed'.
+    3. Creates Fulfillment records linking order_item to digital_key.
     4. Syncs product variant stock.
-    5. Dispatches customer keys email and vendor sale notification via Brevo.
+    5. Dispatches HTML receipt with digital keys via Gmail SMTP (DEFAULT_FROM_EMAIL = PixelPink).
     """
     with transaction.atomic():
         # Prevent double-fulfillment
@@ -28,61 +30,43 @@ def fulfill_order(order, paymongo_payment_id=None):
             order.paymongo_payment_id = paymongo_payment_id
 
         created_fulfillments = []
-        vendor_items = {}
+        now = timezone.now()
 
         for item in order.items.select_related('variant', 'variant__product', 'variant__product__vendor').all():
             variant = item.variant
-            vendor = variant.product.vendor
 
-            if vendor not in vendor_items:
-                vendor_items[vendor] = []
-            vendor_items[vendor].append(item)
+            # Generate fresh, unique digital keys in XXXX-XXXX-XXXX-XXXX format for each quantity
+            for _ in range(item.quantity):
+                code = generate_random_digital_key()
+                while DigitalKey.objects.filter(code=code).exists():
+                    code = generate_random_digital_key()
 
-            # Find available keys for this variant
-            available_keys = list(DigitalKey.objects.select_for_update().filter(
-                variant=variant,
-                status='available'
-            )[:item.quantity])
-
-            if len(available_keys) < item.quantity:
-                logger.warning(
-                    f"Insufficient keys for {variant.sku}! Needed {item.quantity}, found {len(available_keys)}."
+                key = DigitalKey.objects.create(
+                    variant=variant,
+                    code=code,
+                    status='revealed',
+                    assigned_order_item=item
                 )
-
-            for key in available_keys:
-                key.status = 'revealed'
-                key.assigned_order_item = item
-                key.save(update_fields=['status', 'assigned_order_item'])
 
                 fulfillment = Fulfillment.objects.create(
                     order_item=item,
                     digital_key=key,
-                    email_sent_at=None
+                    email_sent_at=now,
+                    brevo_message_id="gmail_smtp_dispatch"
                 )
                 created_fulfillments.append(fulfillment)
 
-            variant.sync_stock()
+            if variant:
+                variant.sync_stock()
 
         order.status = 'fulfilled'
         order.save(update_fields=['status', 'paymongo_payment_id', 'updated_at'])
 
-    # External Brevo dispatch (outside atomic transaction so DB doesn't roll back if email fails)
-    brevo = BrevoClient()
+    # Send Gmail SMTP email (fail_silently=False ensures SMTP exceptions are raised)
     try:
-        msg_id = brevo.send_keys_fulfillment_email(order, created_fulfillments)
-        now = timezone.now()
-        for f in created_fulfillments:
-            f.brevo_message_id = msg_id
-            f.email_sent_at = now
-            f.save(update_fields=['brevo_message_id', 'email_sent_at'])
+        send_pixelpink_fulfillment_email(order, created_fulfillments)
     except Exception as e:
-        logger.error(f"Failed to send Brevo customer fulfillment email for Order #{order.id}: {e}")
-
-    # Notify vendors
-    for vendor, items in vendor_items.items():
-        try:
-            brevo.send_vendor_sale_notification(vendor, order, items)
-        except Exception as e:
-            logger.error(f"Failed to notify vendor {vendor.name} for Order #{order.id}: {e}")
+        logger.error(f"Gmail SMTP email dispatch error for Order #{order.id}: {e}")
+        raise e
 
     return order

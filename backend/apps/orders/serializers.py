@@ -37,10 +37,11 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderListSerializer(serializers.ModelSerializer):
     items_count = serializers.IntegerField(source='items.count', read_only=True)
+    items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
-        fields = ['id', 'status', 'total', 'created_at', 'items_count']
+        fields = ['id', 'status', 'total', 'created_at', 'items_count', 'items']
 
 
 class OrderDetailSerializer(serializers.ModelSerializer):

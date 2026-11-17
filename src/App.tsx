@@ -1,9 +1,27 @@
-import { FormEvent, useMemo, useState, useEffect } from "react"
+import { FormEvent, useMemo, useState, useEffect, useRef } from "react"
 
 const API_BASE = "http://127.0.0.1:8000/api"
 
-type Page = "home" | "store" | "login" | "order-success"
-type IconName = "arrow" | "bag" | "check" | "chevron" | "gamepad" | "heart" | "key" | "mail" | "menu" | "search" | "shield" | "sparkles" | "user" | "x" | "trash" | "external"
+type Page = "home" | "store" | "product-detail" | "seller" | "orders" | "login"
+type IconName =
+  | "arrow"
+  | "bag"
+  | "check"
+  | "chevron"
+  | "gamepad"
+  | "heart"
+  | "key"
+  | "mail"
+  | "menu"
+  | "search"
+  | "shield"
+  | "sparkles"
+  | "user"
+  | "x"
+  | "trash"
+  | "plus"
+  | "store"
+  | "star"
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -79,13 +97,22 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
         <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
       </>
     ),
-    external: (
+    plus: (
       <>
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-        <polyline points="15 3 21 3 21 9" />
-        <line x1="10" y1="14" x2="21" y2="3" />
+        <path d="M12 5v14M5 12h14" />
       </>
-    )
+    ),
+    store: (
+      <>
+        <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7" />
+        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+        <path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4" />
+        <path d="M2 7h20" />
+      </>
+    ),
+    star: (
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    ),
   }
 
   return (
@@ -117,7 +144,10 @@ export interface Product {
   id: number
   name: string
   slug: string
+  brand?: string
+  manufacturer?: string
   description: string
+  about_this_item?: string[]
   base_price: string | number
   cover_image: string
   is_digital: boolean
@@ -135,38 +165,52 @@ export interface Product {
   variants: Variant[]
 }
 
+export interface AuthUser {
+  id: number
+  username: string
+  email: string
+  role: "customer" | "vendor" | "seller"
+  is_seller: boolean
+  vendor?: {
+    id: number
+    name: string
+    slug: string
+  }
+}
+
 export interface CartItem {
   product: Product
   variant: Variant
   quantity: number
 }
 
-export interface FulfilledOrder {
+export interface OrderRecord {
   id: number
   status: string
   total: string
-  items: Array<{
+  created_at: string
+  items?: Array<{
     id: number
     snapshot_name: string
     quantity: number
     unit_price: string
-    fulfillments: Array<{
+    fulfillments?: Array<{
       id: number
       key_code: string
       email_sent_at: string
-      brevo_message_id: string
+      message_id?: string
     }>
   }>
 }
 
 function Brand({ onClick }: { onClick: () => void }) {
   return (
-    <button className="brand" onClick={onClick} aria-label="Pixel Pink home">
+    <button className="brand" onClick={onClick} aria-label="PixelPink home">
       <span className="brand-mark">
         <Icon name="gamepad" size={24} />
       </span>
       <span>
-        PIXEL<span>PINK</span>
+        Pixel<span>Pink</span>
       </span>
     </button>
   )
@@ -175,13 +219,17 @@ function Brand({ onClick }: { onClick: () => void }) {
 function Header({
   page,
   setPage,
+  user,
   cartCount,
   openCart,
+  onLogout,
 }: {
   page: Page
   setPage: (p: Page) => void
+  user: AuthUser | null
   cartCount: number
   openCart: () => void
+  onLogout: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const go = (p: Page) => {
@@ -189,6 +237,8 @@ function Header({
     setMenuOpen(false)
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
+
+  const isSeller = user?.is_seller || user?.role === "vendor" || user?.role === "seller"
 
   return (
     <header className="site-header">
@@ -204,12 +254,41 @@ function Header({
           >
             Home
           </button>
+
+          {/* Browse Products requires login */}
           <button
             className={page === "store" ? "active" : ""}
-            onClick={() => go("store")}
+            onClick={() => {
+              if (!user) {
+                go("login")
+              } else {
+                go("store")
+              }
+            }}
           >
             Browse Products
           </button>
+
+          {/* Role-based Nav link */}
+          {user && (
+            isSeller ? (
+              <button
+                className={page === "seller" ? "active" : ""}
+                onClick={() => go("seller")}
+                style={{ color: "#ed2b70", fontWeight: 700 }}
+              >
+                <Icon name="store" size={15} /> Seller Center
+              </button>
+            ) : (
+              <button
+                className={page === "orders" ? "active" : ""}
+                onClick={() => go("orders")}
+              >
+                My Orders
+              </button>
+            )
+          )}
+
           <button
             onClick={() => {
               if (page !== "home") go("home")
@@ -221,10 +300,62 @@ function Header({
             How it works
           </button>
         </nav>
+
         <div className="header-actions">
-          <button className="login-link" onClick={() => go("login")}>
-            <Icon name="user" size={17} /> Log in
-          </button>
+          {user ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                  background: "#fcedf3",
+                  color: "#ed2b70",
+                  padding: "6px 12px",
+                  borderRadius: "20px",
+                }}
+              >
+                <Icon name="user" size={14} />
+                <span>{user.username}</span>
+                {isSeller && (
+                  <span
+                    style={{
+                      background: "#ed2b70",
+                      color: "white",
+                      fontSize: "9px",
+                      padding: "2px 6px",
+                      borderRadius: "10px",
+                      marginLeft: "4px",
+                    }}
+                  >
+                    SELLER
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={onLogout}
+                style={{
+                  border: "1px solid #ebdbe2",
+                  background: "white",
+                  padding: "6px 12px",
+                  borderRadius: "10px",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  color: "#666",
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button className="login-link" onClick={() => go("login")}>
+              <Icon name="user" size={17} /> Log in
+            </button>
+          )}
+
           <button
             className="cart-button"
             onClick={openCart}
@@ -233,6 +364,7 @@ function Header({
             <Icon name="bag" size={19} />
             {cartCount > 0 && <span>{cartCount}</span>}
           </button>
+
           <button
             className="menu-button"
             onClick={() => setMenuOpen(!menuOpen)}
@@ -246,31 +378,28 @@ function Header({
   )
 }
 
-function ProductCard({
+/* === Clean Product Card for Catalog Grid (No Dropdowns) === */
+function ProductGridCard({
   product,
-  onAddToCart,
+  onSelectProduct,
 }: {
   product: Product
-  onAddToCart: (product: Product, variant: Variant) => void
+  onSelectProduct: (p: Product) => void
 }) {
-  const [liked, setLiked] = useState(false)
-  const [selectedVariantId, setSelectedVariantId] = useState<number>(
-    product.variants?.[0]?.id || 0
-  )
-
-  const currentVariant = useMemo(() => {
-    return product.variants?.find((v) => v.id === selectedVariantId) || product.variants?.[0]
-  }, [product.variants, selectedVariantId])
-
-  const priceFormatted = currentVariant
-    ? Number(currentVariant.price).toLocaleString("en-PH", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      })
-    : Number(product.base_price).toLocaleString("en-PH")
+  const minPrice = useMemo(() => {
+    if (!product.variants || product.variants.length === 0) {
+      return Number(product.base_price)
+    }
+    const prices = product.variants.map((v) => Number(v.price))
+    return Math.min(...prices)
+  }, [product])
 
   return (
-    <article className="game-card">
+    <article
+      className="game-card"
+      style={{ cursor: "pointer" }}
+      onClick={() => onSelectProduct(product)}
+    >
       <div className="card-art">
         <img
           src={product.cover_image || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80"}
@@ -282,82 +411,711 @@ function ProductCard({
           }}
         />
         <span className="game-badge">DIGITAL KEY</span>
-        <button
-          className={liked ? "heart liked" : "heart"}
-          onClick={() => setLiked(!liked)}
-          aria-label="Add to wishlist"
-        >
-          <Icon name="heart" size={18} />
-        </button>
       </div>
 
       <div className="game-info">
         <span className="vendor-badge-pill">
-          {product.vendor?.name || "AUTHENTIC VENDOR"}
+          {product.brand || product.vendor?.name || "AUTHENTIC VENDOR"}
         </span>
-        <h3>{product.name}</h3>
-        <p className="line-clamp-2">{product.description}</p>
+        <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>{product.name}</h3>
+        <p className="line-clamp-2" style={{ minHeight: "34px", fontSize: "12px", color: "#666" }}>
+          {product.description}
+        </p>
 
-        {product.variants && product.variants.length > 0 && (
-          <select
-            className="variant-select"
-            value={currentVariant?.id}
-            onChange={(e) => setSelectedVariantId(Number(e.target.value))}
-          >
-            {product.variants.map((v) => {
-              const label = Object.entries(v.attributes)
-                .map(([_, val]) => val)
-                .join(" • ")
-              return (
-                <option key={v.id} value={v.id}>
-                  {label ? `${label} — ₱${Number(v.price).toLocaleString()}` : `₱${Number(v.price).toLocaleString()}`}
-                </option>
-              )
-            })}
-          </select>
-        )}
-
-        <div className="game-meta">
-          <span>
-            {currentVariant && currentVariant.stock_count > 0 ? (
-              <strong style={{ color: "#22c55e", fontSize: "10px" }}>
-                ✓ {currentVariant.stock_count} in stock
-              </strong>
-            ) : (
-              "Digital delivery"
-            )}
+        <div className="game-meta" style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid #f6ecf0" }}>
+          <div>
+            <div style={{ fontSize: "10px", color: "#888", textTransform: "uppercase" }}>Starting at</div>
+            <strong style={{ fontSize: "18px", color: "#ed2b70" }}>
+              ₱{minPrice.toLocaleString("en-PH")}
+            </strong>
+          </div>
+          <span style={{ fontSize: "11px", fontWeight: "bold", color: "#22c55e", background: "#f0fdf4", padding: "4px 8px", borderRadius: "6px" }}>
+            In Stock
           </span>
-          <strong>₱{priceFormatted}</strong>
         </div>
-
-        <button
-          className="add-button"
-          onClick={() => {
-            if (currentVariant) {
-              onAddToCart(product, currentVariant)
-            }
-          }}
-        >
-          Add to cart <Icon name="bag" size={16} />
-        </button>
       </div>
     </article>
   )
 }
 
+/* === Amazon-Style Product Detail Page === */
+function ProductDetailPage({
+  product,
+  onAddToCart,
+  onBack,
+}: {
+  product: Product
+  onAddToCart: (product: Product, variant: Variant, quantity: number) => void
+  onBack: () => void
+}) {
+  const [selectedVariantId, setSelectedVariantId] = useState<number>(
+    product.variants?.[0]?.id || 0
+  )
+  const [quantity, setQuantity] = useState(1)
+
+  const activeVariant = useMemo(() => {
+    return product.variants?.find((v) => v.id === selectedVariantId) || product.variants?.[0]
+  }, [product.variants, selectedVariantId])
+
+  const priceFormatted = activeVariant
+    ? Number(activeVariant.price).toLocaleString("en-PH")
+    : Number(product.base_price).toLocaleString("en-PH")
+
+  return (
+    <main className="product-detail-page">
+      {/* Breadcrumb */}
+      <div className="detail-breadcrumb">
+        <button onClick={onBack}>← Back to Store</button>
+        <span>/</span>
+        <span>{product.category?.name || "Digital Products"}</span>
+        <span>/</span>
+        <span style={{ color: "#211822", fontWeight: 700 }}>{product.name}</span>
+      </div>
+
+      <div className="detail-grid-amazon">
+        {/* Left Column: Gallery */}
+        <div className="detail-gallery">
+          <div className="detail-main-img-box">
+            <img
+              src={product.cover_image}
+              alt={product.name}
+              className="detail-main-img"
+            />
+          </div>
+          <div className="detail-thumbs">
+            <div className="detail-thumb active">
+              <img src={product.cover_image} alt="Thumbnail 1" />
+            </div>
+            <div className="detail-thumb">
+              <img
+                src="https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=200&q=80"
+                alt="Thumbnail 2"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Middle Column: Title, Amazon-style Variation Buttons & Bullet Points */}
+        <div className="detail-info">
+          <div className="detail-brand-kicker">
+            Visit the {product.brand || product.vendor?.name} Store
+          </div>
+          <h1 className="detail-title">{product.name}</h1>
+
+          <div className="detail-rating-row">
+            <span className="detail-rating-stars">★★★★★ 5.0</span>
+            <span>•</span>
+            <span>Verified Digital Merchant ({product.vendor?.name})</span>
+            <span>•</span>
+            <span style={{ color: "#16a34a", fontWeight: "bold" }}>Official License</span>
+          </div>
+
+          <div className="detail-price-section">
+            <div className="detail-price-label">Price</div>
+            <div className="detail-price-val">₱{priceFormatted}</div>
+          </div>
+
+          {/* Amazon-Style Variation Buttons */}
+          {product.variants && product.variants.length > 0 && (
+            <div className="variation-selector-box">
+              <div className="variation-label-row">
+                <span className="variation-label-title">Select Edition / Platform:</span>
+                <span className="variation-label-selected">
+                  {activeVariant ? Object.values(activeVariant.attributes).join(" • ") : ""}
+                </span>
+              </div>
+
+              <div className="variation-buttons-grid">
+                {product.variants.map((v) => {
+                  const label = Object.values(v.attributes).join(" • ") || v.sku
+                  const isActive = v.id === activeVariant?.id
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      className={`variation-btn ${isActive ? "active" : ""}`}
+                      onClick={() => setSelectedVariantId(v.id)}
+                    >
+                      <span className="variation-btn-name">{label}</span>
+                      <span className="variation-btn-price">
+                        ₱{Number(v.price).toLocaleString("en-PH")}
+                      </span>
+                      <span className="variation-btn-stock">
+                        {v.stock_count > 0 ? `✓ In Stock (${v.stock_count})` : "Out of Stock"}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* About this item (Amazon-style bulleted list) */}
+          <div className="about-item-box">
+            <h3>About this item</h3>
+            {product.about_this_item && product.about_this_item.length > 0 ? (
+              <ul className="about-item-list">
+                {product.about_this_item.map((bullet, idx) => (
+                  <li key={idx}>{bullet}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: "#666", fontSize: "14px", lineHeight: "1.6" }}>
+                {product.description}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column: Amazon-Style Sticky Buy Box */}
+        <div className="buy-box">
+          <div className="buy-box-price">₱{priceFormatted}</div>
+          <div className="buy-box-stock-status">
+            <Icon name="check" size={16} /> In Stock - Instant Email Delivery
+          </div>
+          <div className="buy-box-delivery">
+            Delivered immediately to your registered email via <strong>PixelPink Instant Email Service</strong> upon checkout.
+          </div>
+
+          <div className="buy-box-qty-row">
+            <span>Quantity:</span>
+            <select
+              className="buy-box-qty-select"
+              value={quantity}
+              onChange={(e) => setQuantity(Number(e.target.value))}
+            >
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="buy-box-actions">
+            <button
+              className="buy-box-btn-cart"
+              onClick={() => {
+                if (activeVariant) {
+                  onAddToCart(product, activeVariant, quantity)
+                }
+              }}
+            >
+              <Icon name="bag" size={18} /> Add to Cart
+            </button>
+            <button
+              className="buy-box-btn-buy"
+              onClick={() => {
+                if (activeVariant) {
+                  onAddToCart(product, activeVariant, quantity)
+                }
+              }}
+            >
+              Buy Now
+            </button>
+          </div>
+
+          <div className="buy-box-meta">
+            <div className="buy-box-meta-row">
+              <span>Dispatches from</span>
+              <strong>PixelPink Cloud</strong>
+            </div>
+            <div className="buy-box-meta-row">
+              <span>Sold by</span>
+              <strong>{product.vendor?.name}</strong>
+            </div>
+            <div className="buy-box-meta-row">
+              <span>Payment Gateway</span>
+              <strong>PayMongo Secure</strong>
+            </div>
+          </div>
+
+          <div className="buy-box-trust">
+            <Icon name="shield" size={18} />
+            <span>Buyer Protection Guarantee: Unrevealed keys eligible for refund within 24h.</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  )
+}
+
+/* === Seller Center Dashboard === */
+function SellerCenterPage({
+  user,
+  products,
+  onRefreshProducts,
+}: {
+  user: AuthUser
+  products: Product[]
+  onRefreshProducts: () => void
+}) {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [formData, setFormData] = useState({
+    name: "",
+    brand: user.vendor?.name || "",
+    manufacturer: user.vendor?.name || "",
+    description: "",
+    base_price: 999,
+    cover_image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80",
+    about_text: "Genuine digital license with instant activation.\nOfficial support and permanent access.",
+    variants: [
+      { name: "Standard Edition", price: 999, stock_count: 10 },
+      { name: "Deluxe Edition", price: 1499, stock_count: 10 },
+    ],
+  })
+
+  // Filter products belonging to this seller
+  const sellerProducts = useMemo(() => {
+    if (user.username === "admin") return products // admin can see all
+    return products.filter(
+      (p) =>
+        p.vendor?.id === user.vendor?.id ||
+        p.vendor?.slug === user.vendor?.slug ||
+        (user.vendor?.name && p.vendor?.name.toLowerCase().includes(user.vendor.name.toLowerCase()))
+    )
+  }, [products, user])
+
+  const totalKeys = useMemo(() => {
+    return sellerProducts.reduce(
+      (acc, p) => acc + (p.variants?.reduce((s, v) => s + v.stock_count, 0) || 0),
+      0
+    )
+  }, [sellerProducts])
+
+  const handleAddVariantRow = () => {
+    setFormData((prev) => ({
+      ...prev,
+      variants: [...prev.variants, { name: "New Variant", price: 999, stock_count: 10 }],
+    }))
+  }
+
+  const handleCreateProduct = async (e: FormEvent) => {
+    e.preventDefault()
+    try {
+      const payload = {
+        name: formData.name,
+        brand: formData.brand,
+        manufacturer: formData.manufacturer,
+        description: formData.description,
+        base_price: formData.base_price,
+        cover_image: formData.cover_image,
+        about_this_item: formData.about_text.split("\n").filter(Boolean),
+        username: user.username,
+        variants: formData.variants.map((v) => ({
+          sku: `${formData.name.slice(0, 3).toUpperCase()}-${v.name.slice(0, 4).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+          attributes: { edition: v.name },
+          price: v.price,
+          stock_count: v.stock_count,
+        })),
+      }
+
+      const res = await fetch(`${API_BASE}/vendor/products/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Username": user.username,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (res.ok) {
+        alert("Product and digital keys created successfully!")
+        setShowAddModal(false)
+        onRefreshProducts()
+      } else {
+        const err = await res.json()
+        alert(err.error || "Failed to create product.")
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message)
+    }
+  }
+
+  return (
+    <main className="seller-page">
+      <div className="seller-header-banner">
+        <div className="seller-title-group">
+          <h1>Seller Center — {user.vendor?.name || user.username}</h1>
+          <p>Manage your digital catalog, inspect available keys, and add product variations.</p>
+        </div>
+        <button
+          className="primary-button"
+          onClick={() => setShowAddModal(true)}
+          style={{ background: "#ed2b70", border: 0 }}
+        >
+          <Icon name="plus" size={16} /> Add New Product
+        </button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="seller-stats-grid">
+        <div className="seller-stat-card">
+          <small>Active Products</small>
+          <strong>{sellerProducts.length}</strong>
+        </div>
+        <div className="seller-stat-card">
+          <small>Total Digital Keys</small>
+          <strong style={{ color: "#16a34a" }}>{totalKeys}</strong>
+        </div>
+        <div className="seller-stat-card">
+          <small>Fulfillment Status</small>
+          <strong style={{ color: "#ed2b70" }}>100% Automated</strong>
+        </div>
+        <div className="seller-stat-card">
+          <small>Store Rating</small>
+          <strong>4.9 ★</strong>
+        </div>
+      </div>
+
+      <div className="seller-actions-bar">
+        <h2>Your Store Catalog ({sellerProducts.length} Items)</h2>
+      </div>
+
+      <div className="seller-table-wrap">
+        <table className="seller-table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Brand / Vendor</th>
+              <th>Variations</th>
+              <th>Starting Price</th>
+              <th>Total Stock</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sellerProducts.map((p) => {
+              const stock = p.variants?.reduce((s, v) => s + v.stock_count, 0) || 0
+              return (
+                <tr key={p.id}>
+                  <td>
+                    <div className="seller-table-prod-cell">
+                      <img src={p.cover_image} alt={p.name} className="seller-table-thumb" />
+                      <div>
+                        <strong>{p.name}</strong>
+                        <div style={{ fontSize: "11px", color: "#888" }}>{p.slug}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{p.brand || p.vendor?.name}</td>
+                  <td>
+                    <span style={{ fontWeight: 700, color: "#ed2b70" }}>
+                      {p.variants?.length || 0} variations
+                    </span>
+                  </td>
+                  <td>₱{Number(p.base_price).toLocaleString()}</td>
+                  <td>
+                    <span style={{ color: stock > 0 ? "#16a34a" : "#dc2626", fontWeight: "bold" }}>
+                      {stock} keys available
+                    </span>
+                  </td>
+                  <td>
+                    <span style={{ background: "#dcfce7", color: "#16a34a", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold" }}>
+                      ACTIVE
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add Product Modal */}
+      {showAddModal && (
+        <div className="modal-overlay">
+          <div className="seller-modal">
+            <div className="seller-modal-header">
+              <h2>Add Product &amp; Variations</h2>
+              <button
+                onClick={() => setShowAddModal(false)}
+                style={{ border: 0, background: "none", cursor: "pointer" }}
+              >
+                <Icon name="x" size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="seller-form">
+              <div className="seller-form-grid">
+                <label>
+                  Product Title *
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Cyberpunk 2077 Digital Code"
+                  />
+                </label>
+
+                <label>
+                  Brand / Publisher
+                  <input
+                    type="text"
+                    value={formData.brand}
+                    onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                    placeholder="e.g. CD Projekt Red"
+                  />
+                </label>
+
+                <label>
+                  Base Price (₱) *
+                  <input
+                    type="number"
+                    required
+                    value={formData.base_price}
+                    onChange={(e) => setFormData({ ...formData, base_price: Number(e.target.value) })}
+                  />
+                </label>
+
+                <label>
+                  Cover Image URL
+                  <input
+                    type="url"
+                    value={formData.cover_image}
+                    onChange={(e) => setFormData({ ...formData, cover_image: e.target.value })}
+                  />
+                </label>
+
+                <label className="seller-form-full">
+                  Description
+                  <textarea
+                    rows={2}
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  />
+                </label>
+
+                <label className="seller-form-full">
+                  About this item (1 bullet point per line)
+                  <textarea
+                    rows={3}
+                    value={formData.about_text}
+                    onChange={(e) => setFormData({ ...formData, about_text: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              {/* Dynamic Variations Builder */}
+              <div className="variant-builder-box">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                  <strong style={{ fontSize: "14px" }}>Product Variations &amp; Key Stock:</strong>
+                  <button
+                    type="button"
+                    onClick={handleAddVariantRow}
+                    style={{
+                      border: "1px solid #ed2b70",
+                      background: "white",
+                      color: "#ed2b70",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    + Add Another Variation
+                  </button>
+                </div>
+
+                {formData.variants.map((v, i) => (
+                  <div key={i} className="variant-row-input">
+                    <label>
+                      Variation Name (e.g. Xbox / Steam / ₱500)
+                      <input
+                        type="text"
+                        required
+                        value={v.name}
+                        onChange={(e) => {
+                          const updated = [...formData.variants]
+                          updated[i].name = e.target.value
+                          setFormData({ ...formData, variants: updated })
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Price (₱)
+                      <input
+                        type="number"
+                        required
+                        value={v.price}
+                        onChange={(e) => {
+                          const updated = [...formData.variants]
+                          updated[i].price = Number(e.target.value)
+                          setFormData({ ...formData, variants: updated })
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Keys to Generate
+                      <input
+                        type="number"
+                        required
+                        value={v.stock_count}
+                        onChange={(e) => {
+                          const updated = [...formData.variants]
+                          updated[i].stock_count = Number(e.target.value)
+                          setFormData({ ...formData, variants: updated })
+                        }}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setShowAddModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="primary-button">
+                  Publish Product &amp; Generate Keys
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </main>
+  )
+}
+
+/* === Customer My Orders Page === */
+function MyOrdersPage({ user }: { user: AuthUser }) {
+  const [orders, setOrders] = useState<OrderRecord[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`${API_BASE}/orders/?username=${user.username}&email=${user.email}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setOrders(Array.isArray(data) ? data : data.results || [])
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [user])
+
+  const handleRefund = async (orderId: number) => {
+    if (!confirm("Are you sure you want to request a refund for this order?")) return
+    try {
+      const res = await fetch(`${API_BASE}/orders/${orderId}/refund/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Customer requested digital key return" }),
+      })
+      if (res.ok) {
+        alert("Refund processed successfully via PayMongo.")
+        // Refresh orders
+        const refreshed = await fetch(`${API_BASE}/orders/?username=${user.username}`).then((r) => r.json())
+        setOrders(Array.isArray(refreshed) ? refreshed : refreshed.results || [])
+      }
+    } catch (e: any) {
+      alert("Refund error: " + e.message)
+    }
+  }
+
+  return (
+    <main className="orders-page">
+      <div className="orders-header">
+        <h1>My Orders &amp; Digital Keys</h1>
+        <p style={{ color: "#666" }}>
+          View all your purchases, activation keys, and order history.
+        </p>
+      </div>
+
+      {loading ? (
+        <p>Loading your orders...</p>
+      ) : orders.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 20px", background: "white", borderRadius: "20px" }}>
+          <Icon name="key" size={48} />
+          <h3 style={{ marginTop: "12px" }}>No orders yet</h3>
+          <p style={{ color: "#666" }}>Your purchased digital codes will appear here immediately after payment.</p>
+        </div>
+      ) : (
+        orders.map((order) => (
+          <div key={order.id} className="order-card">
+            <div className="order-card-top">
+              <div>
+                <strong>Order #{order.id}</strong>
+                <span style={{ color: "#888", marginLeft: "12px" }}>
+                  {new Date(order.created_at).toLocaleDateString()}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span className={`order-status-pill ${order.status}`}>{order.status}</span>
+                <strong style={{ fontSize: "16px", color: "#ed2b70" }}>
+                  ₱{Number(order.total).toLocaleString()}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ marginTop: "18px" }}>
+              {order.items?.map((item) => (
+                <div key={item.id} style={{ marginBottom: "16px" }}>
+                  <div style={{ fontWeight: 700, fontSize: "14px" }}>
+                    {item.snapshot_name} (x{item.quantity}) — ₱{Number(item.unit_price).toLocaleString()}
+                  </div>
+
+                  {item.fulfillments && item.fulfillments.length > 0 ? (
+                    item.fulfillments.map((f) => (
+                      <div key={f.id} className="key-box" style={{ marginTop: "8px" }}>
+                        <div style={{ fontSize: "11px", color: "#666" }}>Digital Activation Code:</div>
+                        <code className="key-code-display">{f.key_code}</code>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#16a34a", marginTop: "4px" }}>
+                          <span>✓ Sent via PixelPink Email</span>
+                          <span>Delivered: {f.email_sent_at ? new Date(f.email_sent_at).toLocaleTimeString() : "Instant"}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: "12px", color: "#888", marginTop: "4px" }}>
+                      Key code masked until payment confirmation.
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {order.status !== "refunded" && (
+              <div style={{ textAlign: "right", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #f6ecf0" }}>
+                <button
+                  onClick={() => handleRefund(order.id)}
+                  style={{
+                    border: 0,
+                    background: "none",
+                    color: "#dc2626",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Request Refund (PayMongo API)
+                </button>
+              </div>
+            )}
+          </div>
+        ))
+      )}
+    </main>
+  )
+}
+
+/* === Public Landing Page === */
 function Home({
   products,
   setPage,
-  onAddToCart,
+  onSelectProduct,
 }: {
   products: Product[]
   setPage: (p: Page) => void
-  onAddToCart: (p: Product, v: Variant) => void
+  onSelectProduct: (p: Product) => void
 }) {
-  // Homepage displays only a curated selection (4-6 Featured Products from different vendors)
   const featured = useMemo(() => {
     if (!products.length) return []
-    // Pick 1-2 per vendor
     const game = products.find((p) => p.vendor?.slug === "gamehub-digital")
     const gift = products.find((p) => p.vendor?.slug === "topup-central")
     const soft = products.find((p) => p.vendor?.slug === "codevault-software")
@@ -383,21 +1141,19 @@ function Home({
             <p>
               Discover handpicked game keys, top-up gift cards, and official software
               licenses from trusted digital vendors. Pay with GCash, Maya, or Card via
-              PayMongo and receive keys in seconds.
+              PayMongo and receive keys via PixelPink Email in seconds.
             </p>
             <div className="hero-buttons">
               <button
                 className="primary-button"
                 onClick={() => setPage("store")}
               >
-                Browse all products <Icon name="arrow" size={18} />
+                Browse catalog <Icon name="arrow" size={18} />
               </button>
               <button
                 className="text-button"
                 onClick={() =>
-                  document
-                    .querySelector("#how")
-                    ?.scrollIntoView({ behavior: "smooth" })
+                  document.querySelector("#how")?.scrollIntoView({ behavior: "smooth" })
                 }
               >
                 See how it works
@@ -415,6 +1171,7 @@ function Home({
               </span>
             </div>
           </div>
+
           <div className="hero-visual">
             <div className="hero-card back-card">
               <img
@@ -432,7 +1189,7 @@ function Home({
               />
               <div className="hero-card-info">
                 <div>
-                  <small>GAMEHUB DIGITAL</small>
+                  <small>MOJANG STUDIOS</small>
                   <strong>Minecraft Digital Edition</strong>
                 </div>
                 <span>₱1,249</span>
@@ -451,7 +1208,7 @@ function Home({
         </div>
       </section>
 
-      {/* Featured Products (Curated selection) */}
+      {/* Featured Products */}
       <section className="featured">
         <div className="section-heading">
           <div>
@@ -464,7 +1221,7 @@ function Home({
         </div>
         <div className="game-grid">
           {featured.map((p) => (
-            <ProductCard key={p.id} product={p} onAddToCart={onAddToCart} />
+            <ProductGridCard key={p.id} product={p} onSelectProduct={onSelectProduct} />
           ))}
         </div>
       </section>
@@ -480,7 +1237,7 @@ function Home({
           </h2>
           <p>
             No physical shipping or waiting. Powered by PayMongo Checkout Sessions for
-            fraud-protected transactions and Brevo Transactional Email for instant code dispatch.
+            fraud-protected transactions and PixelPink Instant Email for direct code dispatch.
           </p>
         </div>
         <div className="steps">
@@ -505,52 +1262,22 @@ function Home({
             <div className="step-icon">
               <Icon name="mail" />
             </div>
-            <h3>Brevo Key Dispatch</h3>
+            <h3>PixelPink Email Dispatch</h3>
             <p>Digital keys are allocated instantly and emailed directly to your inbox.</p>
           </div>
         </div>
-      </section>
-
-      {/* Vendors Highlight */}
-      <section className="vendor-banner">
-        <div className="vendor-icon">
-          <Icon name="gamepad" size={34} />
-        </div>
-        <div>
-          <span className="kicker">3 TRUSTED DIGITAL STORES</span>
-          <h2>Multi-Vendor Digital Marketplace</h2>
-          <p>
-            Shop verified collections from GameHub Digital, TopUp Central, and CodeVault Software.
-          </p>
-        </div>
-        <div className="vendor-stats">
-          <div>
-            <strong>15</strong>
-            <span>Products</span>
-          </div>
-          <div>
-            <strong>56</strong>
-            <span>Variations</span>
-          </div>
-          <div>
-            <strong>100%</strong>
-            <span>Digital Delivery</span>
-          </div>
-        </div>
-        <button onClick={() => setPage("store")}>
-          Explore marketplace <Icon name="arrow" size={17} />
-        </button>
       </section>
     </main>
   )
 }
 
+/* === Store Catalog Page (Clean Grid) === */
 function StorePage({
   products,
-  onAddToCart,
+  onSelectProduct,
 }: {
   products: Product[]
-  onAddToCart: (p: Product, v: Variant) => void
+  onSelectProduct: (p: Product) => void
 }) {
   const [query, setQuery] = useState("")
   const [selectedVendor, setSelectedVendor] = useState<string>("All")
@@ -566,6 +1293,7 @@ function StorePage({
         !query ||
         p.name.toLowerCase().includes(query.toLowerCase()) ||
         p.description.toLowerCase().includes(query.toLowerCase()) ||
+        p.brand?.toLowerCase().includes(query.toLowerCase()) ||
         p.vendor?.name.toLowerCase().includes(query.toLowerCase())
 
       return matchVendor && matchQuery
@@ -585,7 +1313,7 @@ function StorePage({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search game titles, gift cards, software licenses, vendors..."
+            placeholder="Search game titles, gift cards, software licenses, brands..."
           />
         </label>
       </section>
@@ -616,7 +1344,11 @@ function StorePage({
         {filtered.length ? (
           <div className="game-grid">
             {filtered.map((prod) => (
-              <ProductCard key={prod.id} product={prod} onAddToCart={onAddToCart} />
+              <ProductGridCard
+                key={prod.id}
+                product={prod}
+                onSelectProduct={onSelectProduct}
+              />
             ))}
           </div>
         ) : (
@@ -631,6 +1363,262 @@ function StorePage({
   )
 }
 
+/* === Login Page with One-Click Demo Role Selection === */
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""
+
+function LoginPage({
+  onLoginSuccess,
+}: {
+  onLoginSuccess: (user: AuthUser, accessToken?: string) => void
+}) {
+  const [username, setUsername] = useState("customer")
+  const [password, setPassword] = useState("customer123")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
+  const googleBtnRef = useRef<HTMLDivElement>(null)
+
+  const handleLogin = async (u = username, p = password) => {
+    setLoading(true)
+    setError("")
+    try {
+      const res = await fetch(`${API_BASE}/auth/login/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, password: p }),
+      })
+      const data = await res.json()
+      if (res.ok && data.user) {
+        onLoginSuccess(data.user, data.access)
+      } else {
+        setError(data.error || "Login failed. Check your credentials.")
+      }
+    } catch (e: any) {
+      setError("Network error: " + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Google Sign-In callback — called by GSI after the user picks an account
+  const handleGoogleCredential = async (response: any) => {
+    setLoading(true)
+    setError("")
+    try {
+      const res = await fetch(`${API_BASE}/auth/google/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential: response.credential }),
+      })
+      const data = await res.json()
+      if (res.ok && data.user) {
+        onLoginSuccess(data.user, data.access)
+      } else {
+        setError(data.error || "Google login failed.")
+      }
+    } catch (e: any) {
+      setError("Network error: " + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Mount the Google GSI button once the script loads
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || !googleBtnRef.current) return
+
+    const initGSI = () => {
+      const google = (window as any).google
+      if (!google?.accounts?.id) return
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential,
+      })
+      google.accounts.id.renderButton(googleBtnRef.current!, {
+        theme: "outline",
+        size: "large",
+        width: "100%",
+        text: "continue_with",
+        shape: "rectangular",
+      })
+    }
+
+    if ((window as any).google?.accounts?.id) {
+      initGSI()
+    } else {
+      const script = document.createElement("script")
+      script.src = "https://accounts.google.com/gsi/client"
+      script.async = true
+      script.defer = true
+      script.onload = initGSI
+      document.head.appendChild(script)
+    }
+  }, [])  // eslint-disable-line
+
+  return (
+    <main className="login-page">
+      <div className="login-panel">
+        <div className="login-art">
+          <div className="login-brand">
+            <Brand onClick={() => {}} />
+          </div>
+          <div className="login-art-content">
+            <span className="login-spark">
+              <Icon name="sparkles" size={30} />
+            </span>
+            <h2>
+              Role-Based
+              <br />
+              <em>Access Portal.</em>
+            </h2>
+            <p>
+              Log in as a <strong>Customer</strong> to shop and view your digital keys, or as a{" "}
+              <strong>Seller</strong> to manage your products and inventory in the Seller Center.
+            </p>
+          </div>
+          <div className="pixel-shape shape-one" />
+          <div className="pixel-shape shape-two" />
+        </div>
+
+        <div className="login-form-wrap">
+          <form
+            className="login-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleLogin()
+            }}
+          >
+            <span className="kicker">AUTHENTICATION REQUIRED</span>
+            <h1>Log in to your account</h1>
+            <p>Choose a demo role below for instant one-click login:</p>
+
+            {/* Quick Demo Role Logins */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+              <button
+                type="button"
+                onClick={() => handleLogin("customer", "customer123")}
+                style={{
+                  padding: "10px",
+                  border: "1px solid #ebdbe2",
+                  background: "#fff8fa",
+                  borderRadius: "10px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "#ed2b70",
+                  cursor: "pointer",
+                }}
+              >
+                👤 Customer Login
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLogin("gamehub", "vendor123")}
+                style={{
+                  padding: "10px",
+                  border: "1px solid #211822",
+                  background: "#211822",
+                  borderRadius: "10px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                🏪 GameHub Seller
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLogin("topup", "vendor123")}
+                style={{
+                  padding: "10px",
+                  border: "1px solid #211822",
+                  background: "#211822",
+                  borderRadius: "10px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                🏪 TopUp Seller
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLogin("codevault", "vendor123")}
+                style={{
+                  padding: "10px",
+                  border: "1px solid #211822",
+                  background: "#211822",
+                  borderRadius: "10px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                🏪 CodeVault Seller
+              </button>
+            </div>
+
+            {error && (
+              <div style={{ color: "#dc2626", fontSize: "12px", marginBottom: "12px", background: "#fef2f2", padding: "8px", borderRadius: "8px" }}>
+                {error}
+              </div>
+            )}
+
+            <label>
+              Username
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
+            </label>
+
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+
+            <button className="submit-button" type="submit" disabled={loading}>
+              {loading ? "Authenticating..." : "Log in"} <Icon name="arrow" size={18} />
+            </button>
+
+            {/* Google OAuth divider + button */}
+            {GOOGLE_CLIENT_ID && (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    margin: "18px 0 14px",
+                    color: "#bbb",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  <span style={{ flex: 1, height: "1px", background: "#eadfe4" }} />
+                  OR CONTINUE WITH
+                  <span style={{ flex: 1, height: "1px", background: "#eadfe4" }} />
+                </div>
+                {/* GSI renders a real Google button into this div */}
+                <div ref={googleBtnRef} style={{ width: "100%" }} />
+              </>
+            )}
+          </form>
+        </div>
+      </div>
+    </main>
+  )
+}
+
+/* === Cart Drawer Component === */
 function CartDrawer({
   isOpen,
   onClose,
@@ -670,7 +1658,7 @@ function CartDrawer({
             <div className="cart-empty-view">
               <Icon name="bag" size={48} />
               <h3>Your cart is empty</h3>
-              <p>Choose your games, gift cards, or licenses from our catalog.</p>
+              <p>Explore the store and pick your digital games, gift cards, or licenses.</p>
             </div>
           ) : (
             cart.map((item) => {
@@ -750,7 +1738,7 @@ function CartDrawer({
               )}
             </button>
             <div style={{ textAlign: "center", marginTop: "10px", fontSize: "11px", color: "#888" }}>
-              Instant digital key delivery via Brevo email
+              Instant digital key delivery to your email
             </div>
           </div>
         )}
@@ -759,12 +1747,13 @@ function CartDrawer({
   )
 }
 
+/* === Order Confirmation / Key Reveal Modal === */
 function OrderSuccessModal({
   order,
   onClose,
   onSimulatePay,
 }: {
-  order: FulfilledOrder | null
+  order: any | null
   onClose: () => void
   onSimulatePay?: (orderId: number) => void
 }) {
@@ -774,44 +1763,105 @@ function OrderSuccessModal({
 
   return (
     <div className="order-modal-backdrop">
-      <div className="order-modal">
-        <div className="order-modal-header">
-          <div className="order-modal-icon">
-            <Icon name={isFulfilled ? "key" : "shield"} size={32} />
+      <div className="order-modal" style={{ textAlign: "center" }}>
+        <div className="order-modal-header" style={{ marginBottom: "20px" }}>
+          <div
+            className="order-modal-icon"
+            style={{
+              background: isFulfilled ? "#ecfdf5" : "#fef2f2",
+              color: isFulfilled ? "#16a34a" : "#ed2b70",
+              width: "64px",
+              height: "64px",
+              borderRadius: "50%",
+              display: "grid",
+              placeItems: "center",
+              margin: "0 auto 16px",
+            }}
+          >
+            <Icon name={isFulfilled ? "check" : "shield"} size={34} />
           </div>
-          <h2>{isFulfilled ? "Order Fulfilled!" : `Order #${order.id} Created`}</h2>
-          <p style={{ color: "#666", fontSize: "13px", marginTop: "4px" }}>
+
+          <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "0 0 10px", color: "#211822" }}>
+            {isFulfilled ? "Payment successful!" : `Order #${order.id} Created`}
+          </h2>
+
+          <p
+            style={{
+              color: isFulfilled ? "#15803d" : "#666",
+              fontSize: "15px",
+              fontWeight: 600,
+              lineHeight: 1.5,
+              margin: "0 0 8px",
+            }}
+          >
             {isFulfilled
-              ? "Your digital codes have been generated and sent via Brevo email."
-              : "Status: Awaiting Payment via PayMongo."}
+              ? "Payment successful! Your digital keys have been sent to your email."
+              : "Status: Awaiting payment via PayMongo."}
           </p>
+
+          {isFulfilled && (
+            <p style={{ color: "#716871", fontSize: "13px", margin: "4px 0 0" }}>
+              Please check your registered inbox for your activation codes and instructions.
+            </p>
+          )}
         </div>
 
-        <div style={{ borderTop: "1px solid #eee", paddingTop: "16px" }}>
-          <h4 style={{ margin: "0 0 10px", fontSize: "14px" }}>Order Items &amp; Keys:</h4>
-          {order.items?.map((item) => (
-            <div key={item.id} className="key-box">
-              <strong style={{ fontSize: "13px" }}>{item.snapshot_name}</strong>
-              {item.fulfillments?.length > 0 ? (
-                item.fulfillments.map((f) => (
-                  <div key={f.id} style={{ marginTop: "6px" }}>
-                    <div style={{ fontSize: "11px", color: "#666" }}>Digital Activation Code:</div>
-                    <code className="key-code-display">{f.key_code}</code>
-                    <small style={{ color: "#22c55e", display: "block", marginTop: "4px" }}>
-                      ✓ Delivered via Brevo (ID: {f.brevo_message_id})
-                    </small>
-                  </div>
-                ))
-              ) : (
-                <div style={{ fontSize: "12px", color: "#888", marginTop: "6px" }}>
-                  Code will be revealed immediately after payment confirmation.
-                </div>
-              )}
+        {/* Order Summary (No Keys Displayed) */}
+        <div
+          style={{
+            borderTop: "1px solid #f2e9ed",
+            borderBottom: "1px solid #f2e9ed",
+            padding: "16px 0",
+            margin: "20px 0",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px", fontSize: "12px", color: "#888" }}>
+            <span>Order Number</span>
+            <strong>#{order.id}</strong>
+          </div>
+
+          {order.items?.map((item: any) => (
+            <div
+              key={item.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "8px 0",
+                fontSize: "13px",
+              }}
+            >
+              <div>
+                <span style={{ fontWeight: 600 }}>{item.snapshot_name}</span>
+                <span style={{ color: "#888", marginLeft: "6px" }}>x{item.quantity}</span>
+              </div>
+              <strong style={{ color: "#211822" }}>
+                ₱{Number(item.unit_price * item.quantity).toLocaleString("en-PH")}
+              </strong>
             </div>
           ))}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: "12px",
+              paddingTop: "12px",
+              borderTop: "1px dashed #eadfe4",
+              fontSize: "15px",
+              fontWeight: 800,
+            }}
+          >
+            <span>Total Paid</span>
+            <span style={{ color: "#ed2b70", fontSize: "18px" }}>
+              ₱{Number(order.total).toLocaleString("en-PH")}
+            </span>
+          </div>
         </div>
 
-        <div style={{ marginTop: "24px", display: "flex", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "10px", marginTop: "24px" }}>
           {!isFulfilled && onSimulatePay && (
             <button
               className="primary-button"
@@ -822,11 +1872,11 @@ function OrderSuccessModal({
             </button>
           )}
           <button
-            className="text-button"
+            className="primary-button"
             style={{ flex: 1, textAlign: "center" }}
             onClick={onClose}
           >
-            Close
+            Continue Shopping
           </button>
         </div>
       </div>
@@ -834,132 +1884,23 @@ function OrderSuccessModal({
   )
 }
 
-function Login({ setPage }: { setPage: (p: Page) => void }) {
-  const [submitted, setSubmitted] = useState(false)
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    setSubmitted(true)
-  }
-
-  return (
-    <main className="login-page">
-      <div className="login-panel">
-        <div className="login-art">
-          <div className="login-brand">
-            <Brand onClick={() => setPage("home")} />
-          </div>
-          <div className="login-art-content">
-            <span className="login-spark">
-              <Icon name="sparkles" size={30} />
-            </span>
-            <h2>
-              Your digital library is
-              <br />
-              <em>ready for you.</em>
-            </h2>
-            <p>
-              Sign in to manage your orders, reveal your digital keys, or access the Seller Center.
-            </p>
-          </div>
-          <div className="pixel-shape shape-one" />
-          <div className="pixel-shape shape-two" />
-          <div className="login-quote">
-            “Purchased a Steam wallet code and had the key in 3 seconds.”
-            <span>— Verified Customer</span>
-          </div>
-        </div>
-        <div className="login-form-wrap">
-          <button className="back-button" onClick={() => setPage("home")}>
-            ← Back to store
-          </button>
-          {submitted ? (
-            <div className="success-state">
-              <span>
-                <Icon name="check" size={32} />
-              </span>
-              <h1>Welcome back.</h1>
-              <p>Demo authentication successful. Your account is linked.</p>
-              <button
-                className="primary-button"
-                onClick={() => setPage("store")}
-              >
-                Explore store <Icon name="arrow" size={18} />
-              </button>
-            </div>
-          ) : (
-            <form className="login-form" onSubmit={handleSubmit}>
-              <span className="kicker">ACCOUNT ACCESS</span>
-              <h1>Log in to PixelPink</h1>
-              <p>
-                Demo credentials: <strong>customer</strong> / <strong>customer123</strong> or <strong>admin</strong> / <strong>admin123</strong>
-              </p>
-              <label>
-                Username or Email
-                <input type="text" defaultValue="customer" required />
-              </label>
-              <label>
-                Password
-                <input type="password" defaultValue="customer123" required />
-              </label>
-              <div className="form-options">
-                <label>
-                  <input type="checkbox" defaultChecked /> Remember me
-                </label>
-                <button type="button">Forgot password?</button>
-              </div>
-              <button className="submit-button" type="submit">
-                Log in <Icon name="arrow" size={18} />
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-    </main>
-  )
-}
-
-function Footer({ setPage }: { setPage: (p: Page) => void }) {
-  return (
-    <footer>
-      <div className="footer-top">
-        <div>
-          <Brand onClick={() => setPage("home")} />
-          <p>Instant digital gaming codes, top-ups, and licenses.</p>
-        </div>
-        <div className="footer-links">
-          <button onClick={() => setPage("store")}>Browse Products</button>
-          <button onClick={() => setPage("home")}>How it works</button>
-          <button onClick={() => setPage("login")}>Account</button>
-          <a
-            href="http://127.0.0.1:8000/admin/"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "#ed2b70", textDecoration: "none", fontSize: "11px", fontWeight: "bold" }}
-          >
-            Django Admin ↗
-          </a>
-        </div>
-      </div>
-      <div className="footer-bottom">
-        <span>© 2025 PixelPink Digital Storefront Prototype</span>
-        <div>
-          <span>
-            Payment Gateway: <strong>PayMongo API</strong>
-          </span>
-          <span>
-            Fulfillment Dispatch: <strong>Brevo v3 API</strong>
-          </span>
-        </div>
-      </div>
-    </footer>
-  )
-}
-
+/* === Main Application Component === */
 export default function App() {
   const [page, setPage] = useState<Page>("home")
   const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [toast, setToast] = useState("")
+
+  // Authentication State
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem("pixelpink_user")
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
+  const [accessToken, setAccessToken] = useState(() => localStorage.getItem("pixelpink_access_token"))
 
   // Cart state persisted to localStorage
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -972,51 +1913,94 @@ export default function App() {
   })
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isCheckingOut, setIsCheckingOut] = useState(false)
-
-  // Order fulfillment modal
-  const [activeOrder, setActiveOrder] = useState<FulfilledOrder | null>(null)
+  const [activeOrder, setActiveOrder] = useState<any | null>(null)
 
   useEffect(() => {
     localStorage.setItem("pixelpink_cart", JSON.stringify(cart))
   }, [cart])
 
-  // Fetch products from Django DRF API
-  useEffect(() => {
+  const fetchCatalog = () => {
     fetch(`${API_BASE}/products/`)
       .then((res) => res.json())
       .then((data) => {
-        // Handle DRF list response or paginated results
         const items = Array.isArray(data) ? data : data.results || []
         setProducts(items)
-        setLoading(false)
       })
-      .catch((err) => {
-        console.error("Failed to fetch products from Django API:", err)
-        setLoading(false)
-      })
+      .catch((err) => console.error("Catalog fetch error:", err))
+  }
+
+  useEffect(() => {
+    fetchCatalog()
   }, [])
 
-  const navigate = (next: Page) => {
-    setPage(next)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(""), 3000)
+  }
+
+  const handleLoginSuccess = (loggedInUser: AuthUser, token?: string) => {
+    setUser(loggedInUser)
+    setAccessToken(token || null)
+    localStorage.setItem("pixelpink_user", JSON.stringify(loggedInUser))
+    if (token) {
+      localStorage.setItem("pixelpink_access_token", token)
+    } else {
+      localStorage.removeItem("pixelpink_access_token")
+    }
+    showToast(`Welcome back, ${loggedInUser.username}!`)
+    if (loggedInUser.is_seller || loggedInUser.role === "vendor") {
+      setPage("seller")
+    } else {
+      setPage("store")
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE}/auth/logout/`, { method: "POST" })
+    } catch {}
+    setUser(null)
+    setAccessToken(null)
+    localStorage.removeItem("pixelpink_user")
+    localStorage.removeItem("pixelpink_access_token")
+    showToast("Logged out successfully.")
+    setPage("home")
+  }
+
+  // Auth Guards: If not logged in, clicking product or cart redirects to login
+  const handleSelectProduct = (p: Product) => {
+    if (!user) {
+      showToast("Please log in to view product details and purchase.")
+      setPage("login")
+      return
+    }
+    setSelectedProduct(p)
+    setPage("product-detail")
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const addToCart = (product: Product, variant: Variant) => {
+  const handleAddToCart = (product: Product, variant: Variant, quantity = 1) => {
+    if (!user) {
+      showToast("Please log in to add products to your cart.")
+      setPage("login")
+      return
+    }
+
     setCart((prev) => {
       const existing = prev.find((item) => item.variant.id === variant.id)
       if (existing) {
         return prev.map((item) =>
           item.variant.id === variant.id
-            ? { ...item, quantity: item.quantity + 1 }
+            ? { ...item, quantity: item.quantity + quantity }
             : item
         )
       }
-      return [...prev, { product, variant, quantity: 1 }]
+      return [...prev, { product, variant, quantity }]
     })
 
     const attrSummary = Object.values(variant.attributes).join(" • ")
-    setToast(`Added ${product.name} (${attrSummary || "Item"}) to cart`)
-    setTimeout(() => setToast(""), 2800)
+    showToast(`Added ${product.name} (${attrSummary || "Item"}) to cart`)
+    setIsCartOpen(true)
   }
 
   const updateQuantity = (variantId: number, qty: number) => {
@@ -1037,6 +2021,11 @@ export default function App() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return
+    if (!user) {
+      setIsCartOpen(false)
+      setPage("login")
+      return
+    }
     setIsCheckingOut(true)
 
     try {
@@ -1045,15 +2034,18 @@ export default function App() {
           variant_id: i.variant.id,
           quantity: i.quantity,
         })),
-        email: "customer@example.com",
-        name: "Demo Customer",
+        email: user.email || "customer@example.com",
+        name: user.username,
         success_url: window.location.origin + "?checkout_success=true",
         cancel_url: window.location.origin,
       }
 
       const res = await fetch(`${API_BASE}/checkout/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify(payload),
       })
 
@@ -1070,7 +2062,7 @@ export default function App() {
       setIsCartOpen(false)
 
       if (data.checkout_url && !data.checkout_url.includes("mock_session")) {
-        // Redirect to real PayMongo Hosted Checkout Page
+        // Redirect to PayMongo Hosted Checkout Page
         window.location.href = data.checkout_url
       } else {
         // Mock / Development mode: fetch created order and show success modal
@@ -1093,11 +2085,16 @@ export default function App() {
       const data = await res.json()
       if (res.ok) {
         setActiveOrder(data.order)
-        setToast("Order paid! Digital keys fulfilled and emailed via Brevo.")
-        setTimeout(() => setToast(""), 3500)
+        showToast("Order paid! Your digital keys have been sent to your email.")
+      } else {
+        alert(data.error || "Simulation failed.")
+        if (data.order) {
+          setActiveOrder(data.order)
+        }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Simulation failed:", e)
+      alert(`Simulation error: ${e.message}`)
     }
   }
 
@@ -1107,31 +2104,55 @@ export default function App() {
     <div className="app">
       <Header
         page={page}
-        setPage={navigate}
+        setPage={setPage}
+        user={user}
         cartCount={totalCartCount}
-        openCart={() => setIsCartOpen(true)}
+        openCart={() => {
+          if (!user) {
+            showToast("Please log in to access your cart.")
+            setPage("login")
+          } else {
+            setIsCartOpen(true)
+          }
+        }}
+        onLogout={handleLogout}
       />
 
       {page === "home" && (
         <Home
           products={products}
-          setPage={navigate}
-          onAddToCart={addToCart}
+          setPage={setPage}
+          onSelectProduct={handleSelectProduct}
         />
       )}
 
       {page === "store" && (
         <StorePage
           products={products}
-          onAddToCart={addToCart}
+          onSelectProduct={handleSelectProduct}
         />
       )}
 
-      {page === "login" && <Login setPage={navigate} />}
+      {page === "product-detail" && selectedProduct && (
+        <ProductDetailPage
+          product={selectedProduct}
+          onAddToCart={handleAddToCart}
+          onBack={() => setPage("store")}
+        />
+      )}
 
-      {page !== "login" && <Footer setPage={navigate} />}
+      {page === "seller" && user && (
+        <SellerCenterPage
+          user={user}
+          products={products}
+          onRefreshProducts={fetchCatalog}
+        />
+      )}
 
-      {/* Cart Drawer */}
+      {page === "orders" && user && <MyOrdersPage user={user} />}
+
+      {page === "login" && <LoginPage onLoginSuccess={handleLoginSuccess} />}
+
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -1142,12 +2163,36 @@ export default function App() {
         isCheckingOut={isCheckingOut}
       />
 
-      {/* Order & Keys Modal */}
       <OrderSuccessModal
         order={activeOrder}
         onClose={() => setActiveOrder(null)}
         onSimulatePay={handleSimulatePayment}
       />
+
+      {page !== "login" && (
+        <footer>
+          <div className="footer-top">
+            <div>
+              <Brand onClick={() => setPage("home")} />
+              <p style={{ color: "#a89aa2", fontSize: "12px", marginTop: "8px" }}>
+                Instant authentic digital codes, prepaid gift cards, and official licenses.
+              </p>
+            </div>
+            <div className="footer-links">
+              <button onClick={() => setPage("store")}>Browse Products</button>
+              <button onClick={() => setPage("home")}>How it works</button>
+              <button onClick={() => setPage("login")}>Account</button>
+            </div>
+          </div>
+          <div className="footer-bottom">
+            <span>© 2025 PixelPink | Digital Storefront. All rights reserved.</span>
+            <div>
+              <span>Payment Gateway: <strong>PayMongo Secure</strong></span>
+              <span>Delivery: <strong>Instant Email Delivery</strong></span>
+            </div>
+          </div>
+        </footer>
+      )}
 
       {toast && (
         <div className="toast">
