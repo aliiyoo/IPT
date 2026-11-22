@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'apps.store',
     'apps.orders',
     'apps.integrations',
+    'apps.payments.apps.PaymentsConfig',
 ]
 
 MIDDLEWARE = [
@@ -141,6 +142,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
+    'DEFAULT_THROTTLE_RATES': {
+        'payment_checkout': '20/hour',
+        'payment_webhook': '120/minute',
+    },
 }
 
 # JWT / dj-rest-auth
@@ -172,8 +177,12 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 # CORS settings
+from corsheaders.defaults import default_headers
+
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin-allow-popups'
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [*default_headers, 'idempotency-key']
 
 # Email Configuration (Gmail SMTP via SSL port 465)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -189,9 +198,16 @@ if EMAIL_HOST_USER and EMAIL_HOST_USER != 'your_email@gmail.com':
 else:
     DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'PixelPink <noreply@pixelpink.store>').strip()
 
-# External APIs
-PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY', '')
-PAYMONGO_PUBLIC_KEY = os.getenv('PAYMONGO_PUBLIC_KEY', '')
-PAYMONGO_WEBHOOK_SECRET = os.getenv('PAYMONGO_WEBHOOK_SECRET', '')
+# Credit payment API
+PAYMENT_PROVIDER = os.getenv('PAYMENT_PROVIDER', 'custom').strip().lower()
+GATEWAY_WEBHOOK_SECRET = os.getenv('GATEWAY_WEBHOOK_SECRET', '').strip()
+if not GATEWAY_WEBHOOK_SECRET and DEBUG:
+    GATEWAY_WEBHOOK_SECRET = SECRET_KEY
+PAYMENT_SESSION_TTL_MINUTES = int(os.getenv('PAYMENT_SESSION_TTL_MINUTES', '30'))
+PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY', '').strip()
+PAYMONGO_WEBHOOK_SECRET = os.getenv('PAYMONGO_WEBHOOK_SECRET', '').strip()
+EMAIL_API_BASE_URL = os.getenv('EMAIL_API_BASE_URL', '').strip()
+EMAIL_API_KEY = os.getenv('EMAIL_API_KEY', '').strip()
+DIGITAL_KEY_ENCRYPTION_KEY = os.getenv('DIGITAL_KEY_ENCRYPTION_KEY', '').strip()
 
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8443')

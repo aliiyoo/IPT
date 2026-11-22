@@ -24,6 +24,7 @@ def get_tokens_for_user(user):
 
 class GoogleLoginView(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
     def post(self, request):
         credential = request.data.get('credential')

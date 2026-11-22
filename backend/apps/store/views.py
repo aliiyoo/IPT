@@ -1,5 +1,6 @@
 import string
 import random
+from decimal import Decimal, ROUND_CEILING
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -174,6 +175,7 @@ class VendorProductListCreateView(APIView):
                 sku=sku,
                 attributes=attrs,
                 price=price,
+                price_credits=max(1, int(Decimal(str(price)).to_integral_value(rounding=ROUND_CEILING))),
                 stock_count=stock
             )
 

@@ -1,6 +1,6 @@
 import random
 import string
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from apps.accounts.models import Profile
@@ -456,6 +456,7 @@ class Command(BaseCommand):
                     sku=v["sku"],
                     attributes=v["attrs"],
                     price=v["price"],
+                    price_credits=int(v["price"].to_integral_value(rounding=ROUND_CEILING)),
                 )
                 total_variants += 1
 

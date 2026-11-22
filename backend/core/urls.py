@@ -6,6 +6,7 @@ urlpatterns = [
 
     # Existing PixelPink API
     path('api/', include('apps.accounts.urls')),
+    path('api/', include('apps.payments.urls')),
     path('api/', include('apps.store.urls')),
     path('api/', include('apps.orders.urls')),
 

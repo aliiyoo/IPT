@@ -37,6 +37,15 @@ export default defineConfig(({ mode }) => {
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
       port: parseInt(process.env.PORT || "8443"),
       strictPort: true,
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+      },
+      proxy: {
+        "/api": {
+          target: process.env.PAYMENT_API_PROXY_TARGET || "http://127.0.0.1:8000",
+          changeOrigin: true,
+        },
+      },
       watch: {
         ignored: ["**/.figma/**"],
       },
@@ -44,6 +53,9 @@ export default defineConfig(({ mode }) => {
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
       port: parseInt(process.env.PORT || "8443"),
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+      },
     },
   }
 })

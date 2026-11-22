@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useState, useEffect, useRef } from "react"
+import { Component, FormEvent, useMemo, useState, useEffect, useRef } from "react"
 
-const API_BASE = "http://127.0.0.1:8000/api"
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api"
 
 type Page = "home" | "store" | "product-detail" | "seller" | "orders" | "login"
 type IconName =
@@ -137,6 +137,7 @@ export interface Variant {
   sku: string
   attributes: Record<string, string>
   price: string | number
+  price_credits?: string | number | null
   stock_count: number
 }
 
@@ -184,23 +185,57 @@ export interface CartItem {
   quantity: number
 }
 
-export interface OrderRecord {
-  id: number
+export interface PaymentOrderRecord {
+  id: string
   status: string
-  total: string
-  created_at: string
-  items?: Array<{
-    id: number
-    snapshot_name: string
-    quantity: number
-    unit_price: string
-    fulfillments?: Array<{
-      id: number
-      key_code: string
-      email_sent_at: string
-      message_id?: string
-    }>
-  }>
+  productName: string
+  variant: Record<string, string>
+  quantity: number
+  creditsSpent: number
+  keyDeliveryStatus: "pending" | "sent" | "failed"
+  maskedEmail: string
+  createdAt: string
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatPeso(value: unknown): string {
+  const parsed = finiteNumber(value)
+  return parsed === null
+    ? "—"
+    : `₱${parsed.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatCredits(value: unknown): string {
+  const parsed = finiteNumber(value)
+  return parsed === null ? "—" : parsed.toLocaleString("en-PH")
+}
+
+class ProductDetailErrorBoundary extends Component<
+  { children: React.ReactNode; onBack: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="product-detail-page">
+          <p>Couldn't load this product.</p>
+          <button className="text-button" onClick={this.props.onBack}>Back to products</button>
+        </main>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function Brand({ onClick }: { onClick: () => void }) {
@@ -220,6 +255,7 @@ function Header({
   page,
   setPage,
   user,
+  walletBalance,
   cartCount,
   openCart,
   onLogout,
@@ -227,6 +263,7 @@ function Header({
   page: Page
   setPage: (p: Page) => void
   user: AuthUser | null
+  walletBalance: number | null
   cartCount: number
   openCart: () => void
   onLogout: () => void
@@ -304,6 +341,9 @@ function Header({
         <div className="header-actions">
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <span className="wallet-badge">
+                {walletBalance === null ? "Wallet ..." : `${formatCredits(walletBalance)} credits`}
+              </span>
               <div
                 style={{
                   display: "flex",
@@ -387,11 +427,16 @@ function ProductGridCard({
   onSelectProduct: (p: Product) => void
 }) {
   const minPrice = useMemo(() => {
-    if (!product.variants || product.variants.length === 0) {
-      return Number(product.base_price)
-    }
-    const prices = product.variants.map((v) => Number(v.price))
-    return Math.min(...prices)
+    const prices = (product.variants || [])
+      .map((variant) => finiteNumber(variant.price_credits))
+      .filter((price): price is number => price !== null)
+    return prices.length ? Math.min(...prices) : null
+  }, [product])
+  const minPeso = useMemo(() => {
+    const prices = (product.variants || [])
+      .map((variant) => finiteNumber(variant.price))
+      .filter((price): price is number => price !== null)
+    return prices.length ? Math.min(...prices) : finiteNumber(product.base_price)
   }, [product])
 
   return (
@@ -425,8 +470,8 @@ function ProductGridCard({
         <div className="game-meta" style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid #f6ecf0" }}>
           <div>
             <div style={{ fontSize: "10px", color: "#888", textTransform: "uppercase" }}>Starting at</div>
-            <strong style={{ fontSize: "18px", color: "#ed2b70" }}>
-              ₱{minPrice.toLocaleString("en-PH")}
+            <strong style={{ fontSize: "15px", color: "#ed2b70" }}>
+              {formatPeso(minPeso)} · {formatCredits(minPrice)} credits
             </strong>
           </div>
           <span style={{ fontSize: "11px", fontWeight: "bold", color: "#22c55e", background: "#f0fdf4", padding: "4px 8px", borderRadius: "6px" }}>
@@ -441,11 +486,15 @@ function ProductGridCard({
 /* === Amazon-Style Product Detail Page === */
 function ProductDetailPage({
   product,
+  walletBalance,
   onAddToCart,
+  onBuyNow,
   onBack,
 }: {
   product: Product
+  walletBalance: number | null
   onAddToCart: (product: Product, variant: Variant, quantity: number) => void
+  onBuyNow: (product: Product, variant: Variant, quantity: number) => void
   onBack: () => void
 }) {
   const [selectedVariantId, setSelectedVariantId] = useState<number>(
@@ -457,9 +506,8 @@ function ProductDetailPage({
     return product.variants?.find((v) => v.id === selectedVariantId) || product.variants?.[0]
   }, [product.variants, selectedVariantId])
 
-  const priceFormatted = activeVariant
-    ? Number(activeVariant.price).toLocaleString("en-PH")
-    : Number(product.base_price).toLocaleString("en-PH")
+  const pesoPrice = formatPeso(activeVariant?.price ?? product.base_price)
+  const creditsPrice = formatCredits(activeVariant?.price_credits)
 
   return (
     <main className="product-detail-page">
@@ -477,14 +525,14 @@ function ProductDetailPage({
         <div className="detail-gallery">
           <div className="detail-main-img-box">
             <img
-              src={product.cover_image}
+              src={product.cover_image || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80"}
               alt={product.name}
               className="detail-main-img"
             />
           </div>
           <div className="detail-thumbs">
             <div className="detail-thumb active">
-              <img src={product.cover_image} alt="Thumbnail 1" />
+              <img src={product.cover_image || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80"} alt="Thumbnail 1" />
             </div>
             <div className="detail-thumb">
               <img
@@ -512,7 +560,9 @@ function ProductDetailPage({
 
           <div className="detail-price-section">
             <div className="detail-price-label">Price</div>
-            <div className="detail-price-val">₱{priceFormatted}</div>
+            <div className="detail-price-val">{pesoPrice}</div>
+            <div className="detail-credit-price">{creditsPrice} credits</div>
+            <div className="detail-balance">Your balance: {walletBalance === null ? "—" : `${formatCredits(walletBalance)} credits`}</div>
           </div>
 
           {/* Amazon-Style Variation Buttons */}
@@ -538,10 +588,10 @@ function ProductDetailPage({
                     >
                       <span className="variation-btn-name">{label}</span>
                       <span className="variation-btn-price">
-                        ₱{Number(v.price).toLocaleString("en-PH")}
+                        {formatPeso(v.price)} · {formatCredits(v.price_credits)} credits
                       </span>
                       <span className="variation-btn-stock">
-                        {v.stock_count > 0 ? `✓ In Stock (${v.stock_count})` : "Out of Stock"}
+                        {v.stock_count > 0 ? `✓ In Stock (${v.stock_count})` : "✓ Available"}
                       </span>
                     </button>
                   )
@@ -569,12 +619,13 @@ function ProductDetailPage({
 
         {/* Right Column: Amazon-Style Sticky Buy Box */}
         <div className="buy-box">
-          <div className="buy-box-price">₱{priceFormatted}</div>
+          <div className="buy-box-price">{pesoPrice}</div>
+          <div className="buy-box-credit-price">{creditsPrice} credits</div>
           <div className="buy-box-stock-status">
             <Icon name="check" size={16} /> In Stock - Instant Email Delivery
           </div>
           <div className="buy-box-delivery">
-            Delivered immediately to your registered email via <strong>PixelPink Instant Email Service</strong> upon checkout.
+            Delivered to your account email after payment confirmation.
           </div>
 
           <div className="buy-box-qty-row">
@@ -607,7 +658,7 @@ function ProductDetailPage({
               className="buy-box-btn-buy"
               onClick={() => {
                 if (activeVariant) {
-                  onAddToCart(product, activeVariant, quantity)
+                  onBuyNow(product, activeVariant, quantity)
                 }
               }}
             >
@@ -626,7 +677,7 @@ function ProductDetailPage({
             </div>
             <div className="buy-box-meta-row">
               <span>Payment Gateway</span>
-              <strong>PayMongo Secure</strong>
+              <strong>Wallet credits</strong>
             </div>
           </div>
 
@@ -804,7 +855,7 @@ function SellerCenterPage({
                       {p.variants?.length || 0} variations
                     </span>
                   </td>
-                  <td>₱{Number(p.base_price).toLocaleString()}</td>
+                  <td>{formatPeso(p.base_price)}</td>
                   <td>
                     <span style={{ color: stock > 0 ? "#16a34a" : "#dc2626", fontWeight: "bold" }}>
                       {stock} keys available
@@ -985,36 +1036,41 @@ function SellerCenterPage({
 }
 
 /* === Customer My Orders Page === */
-function MyOrdersPage({ user }: { user: AuthUser }) {
-  const [orders, setOrders] = useState<OrderRecord[]>([])
+function MyOrdersPage({ accessToken }: { accessToken: string | null }) {
+  const [orders, setOrders] = useState<PaymentOrderRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
 
   useEffect(() => {
-    fetch(`${API_BASE}/orders/?username=${user.username}&email=${user.email}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setOrders(Array.isArray(data) ? data : data.results || [])
-        setLoading(false)
+    if (!accessToken) {
+      setLoading(false)
+      return
+    }
+    fetch(`${API_BASE}/orders/`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || "Orders could not be loaded.")
+        setOrders(Array.isArray(data) ? data : [])
       })
-      .catch(() => setLoading(false))
-  }, [user])
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Orders could not be loaded."))
+      .finally(() => setLoading(false))
+  }, [accessToken])
 
-  const handleRefund = async (orderId: number) => {
-    if (!confirm("Are you sure you want to request a refund for this order?")) return
+  const handleResend = async (orderId: string) => {
+    if (!accessToken) return
+    setError("")
     try {
-      const res = await fetch(`${API_BASE}/orders/${orderId}/refund/`, {
+      const res = await fetch(`${API_BASE}/orders/${orderId}/resend-key-email/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "Customer requested digital key return" }),
+        headers: { Authorization: `Bearer ${accessToken}` },
       })
-      if (res.ok) {
-        alert("Refund processed successfully via PayMongo.")
-        // Refresh orders
-        const refreshed = await fetch(`${API_BASE}/orders/?username=${user.username}`).then((r) => r.json())
-        setOrders(Array.isArray(refreshed) ? refreshed : refreshed.results || [])
-      }
-    } catch (e: any) {
-      alert("Refund error: " + e.message)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Email delivery retry failed.")
+      setOrders((current) => current.map((order) => order.id === orderId
+        ? { ...order, keyDeliveryStatus: data.keyDeliveryStatus }
+        : order))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Email delivery retry failed.")
     }
   }
 
@@ -1023,78 +1079,51 @@ function MyOrdersPage({ user }: { user: AuthUser }) {
       <div className="orders-header">
         <h1>My Orders &amp; Digital Keys</h1>
         <p style={{ color: "#666" }}>
-          View all your purchases, activation keys, and order history.
+          View purchases and the status of each email delivery.
         </p>
       </div>
 
       {loading ? (
         <p>Loading your orders...</p>
+      ) : error ? (
+        <p className="payment-error" role="alert">{error}</p>
+      ) : !accessToken ? (
+        <p className="payment-error" role="alert">Sign in again to view your orders.</p>
       ) : orders.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 20px", background: "white", borderRadius: "20px" }}>
           <Icon name="key" size={48} />
           <h3 style={{ marginTop: "12px" }}>No orders yet</h3>
-          <p style={{ color: "#666" }}>Your purchased digital codes will appear here immediately after payment.</p>
+          <p style={{ color: "#666" }}>Your paid orders will appear here.</p>
         </div>
       ) : (
         orders.map((order) => (
           <div key={order.id} className="order-card">
             <div className="order-card-top">
               <div>
-                <strong>Order #{order.id}</strong>
+                <strong>Order {order.id.slice(0, 8)}</strong>
                 <span style={{ color: "#888", marginLeft: "12px" }}>
-                  {new Date(order.created_at).toLocaleDateString()}
+                  {new Date(order.createdAt).toLocaleDateString()}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <span className={`order-status-pill ${order.status}`}>{order.status}</span>
                 <strong style={{ fontSize: "16px", color: "#ed2b70" }}>
-                  ₱{Number(order.total).toLocaleString()}
+                  {formatCredits(order.creditsSpent)} credits
                 </strong>
               </div>
             </div>
 
-            <div style={{ marginTop: "18px" }}>
-              {order.items?.map((item) => (
-                <div key={item.id} style={{ marginBottom: "16px" }}>
-                  <div style={{ fontWeight: 700, fontSize: "14px" }}>
-                    {item.snapshot_name} (x{item.quantity}) — ₱{Number(item.unit_price).toLocaleString()}
-                  </div>
-
-                  {item.fulfillments && item.fulfillments.length > 0 ? (
-                    item.fulfillments.map((f) => (
-                      <div key={f.id} className="key-box" style={{ marginTop: "8px" }}>
-                        <div style={{ fontSize: "11px", color: "#666" }}>Digital Activation Code:</div>
-                        <code className="key-code-display">{f.key_code}</code>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#16a34a", marginTop: "4px" }}>
-                          <span>✓ Sent via PixelPink Email</span>
-                          <span>Delivered: {f.email_sent_at ? new Date(f.email_sent_at).toLocaleTimeString() : "Instant"}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ fontSize: "12px", color: "#888", marginTop: "4px" }}>
-                      Key code masked until payment confirmation.
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="payment-order-row">
+              <div>
+                <strong>{order.productName} × {order.quantity}</strong>
+                <span>Delivered to {order.maskedEmail || "your account email"}</span>
+              </div>
+              <span className={`delivery-status ${order.keyDeliveryStatus}`}>{order.keyDeliveryStatus}</span>
             </div>
 
-            {order.status !== "refunded" && (
-              <div style={{ textAlign: "right", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #f6ecf0" }}>
-                <button
-                  onClick={() => handleRefund(order.id)}
-                  style={{
-                    border: 0,
-                    background: "none",
-                    color: "#dc2626",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Request Refund (PayMongo API)
-                </button>
+            {order.keyDeliveryStatus === "failed" && (
+              <div style={{ textAlign: "right", marginTop: "14px" }}>
+                <button className="payment-retry-button" onClick={() => handleResend(order.id)}>Resend key email</button>
               </div>
             )}
           </div>
@@ -1140,8 +1169,8 @@ function Home({
             </h1>
             <p>
               Discover handpicked game keys, top-up gift cards, and official software
-              licenses from trusted digital vendors. Pay with GCash, Maya, or Card via
-              PayMongo and receive keys via PixelPink Email in seconds.
+              licenses from trusted digital vendors. Pay with wallet credits and receive
+              your key by email after the payment event is confirmed.
             </p>
             <div className="hero-buttons">
               <button
@@ -1164,7 +1193,7 @@ function Home({
                 <Icon name="check" size={15} /> Instant email delivery
               </span>
               <span>
-                <Icon name="check" size={15} /> PayMongo secure checkout
+                <Icon name="check" size={15} /> Credit wallet checkout
               </span>
               <span>
                 <Icon name="check" size={15} /> 100% verified digital keys
@@ -1192,7 +1221,7 @@ function Home({
                   <small>MOJANG STUDIOS</small>
                   <strong>Minecraft Digital Edition</strong>
                 </div>
-                <span>₱1,249</span>
+                <span>1,249 credits</span>
               </div>
             </div>
             <div className="floating-key">
@@ -1236,8 +1265,8 @@ function Home({
             in just seconds.
           </h2>
           <p>
-            No physical shipping or waiting. Powered by PayMongo Checkout Sessions for
-            fraud-protected transactions and PixelPink Instant Email for direct code dispatch.
+            No physical shipping or waiting. Confirm a credit payment and receive your
+            digital key by email after verification.
           </p>
         </div>
         <div className="steps">
@@ -1254,8 +1283,8 @@ function Home({
             <div className="step-icon">
               <Icon name="shield" />
             </div>
-            <h3>Pay via PayMongo</h3>
-            <p>Pay securely with GCash, Maya, cards, or online banking.</p>
+            <h3>Pay with credits</h3>
+            <p>Your wallet balance is checked and debited only after a verified payment event.</p>
           </div>
           <div className="step">
             <span>03</span>
@@ -1623,6 +1652,7 @@ function CartDrawer({
   isOpen,
   onClose,
   cart,
+  walletBalance,
   onUpdateQuantity,
   onRemoveItem,
   onCheckout,
@@ -1631,6 +1661,7 @@ function CartDrawer({
   isOpen: boolean
   onClose: () => void
   cart: CartItem[]
+  walletBalance: number | null
   onUpdateQuantity: (variantId: number, qty: number) => void
   onRemoveItem: (variantId: number) => void
   onCheckout: () => void
@@ -1638,9 +1669,10 @@ function CartDrawer({
 }) {
   if (!isOpen) return null
 
-  const subtotal = cart.reduce((acc, item) => {
-    return acc + Number(item.variant.price) * item.quantity
-  }, 0)
+  const selectedLine = cart[0]
+  const subtotal = selectedLine
+    ? (finiteNumber(selectedLine.variant.price_credits) ?? 0) * selectedLine.quantity
+    : 0
 
   return (
     <>
@@ -1665,7 +1697,7 @@ function CartDrawer({
               const variantLabel = Object.entries(item.variant.attributes)
                 .map(([_, v]) => v)
                 .join(" • ")
-              const itemTotal = Number(item.variant.price) * item.quantity
+              const itemTotal = (finiteNumber(item.variant.price_credits) ?? 0) * item.quantity
 
               return (
                 <div key={item.variant.id} className="cart-item">
@@ -1679,7 +1711,7 @@ function CartDrawer({
                       <h4 className="cart-item-title">{item.product.name}</h4>
                       <span className="cart-item-variant">{variantLabel || "Standard"}</span>
                       <div className="cart-item-price">
-                        ₱{itemTotal.toLocaleString("en-PH")}
+                        {formatCredits(itemTotal)} credits
                       </div>
                     </div>
 
@@ -1721,8 +1753,12 @@ function CartDrawer({
         {cart.length > 0 && (
           <div className="cart-footer">
             <div className="cart-subtotal-row">
-              <span>Total Amount:</span>
-              <span>₱{subtotal.toLocaleString("en-PH")}</span>
+              <span>Selected line total:</span>
+              <span>{formatCredits(subtotal)} credits</span>
+            </div>
+            <div className="cart-wallet-row">
+              <span>Available balance</span>
+              <strong>{walletBalance === null ? "Loading..." : `${formatCredits(walletBalance)} credits`}</strong>
             </div>
             <button
               className="cart-checkout-btn"
@@ -1733,12 +1769,12 @@ function CartDrawer({
                 "Connecting to PayMongo..."
               ) : (
                 <>
-                  Checkout with PayMongo <Icon name="arrow" size={18} />
+                  Checkout with credits <Icon name="arrow" size={18} />
                 </>
               )}
             </button>
             <div style={{ textAlign: "center", marginTop: "10px", fontSize: "11px", color: "#888" }}>
-              Instant digital key delivery to your email
+              One product line is paid per checkout session
             </div>
           </div>
         )}
@@ -1837,7 +1873,7 @@ function OrderSuccessModal({
                 <span style={{ color: "#888", marginLeft: "6px" }}>x{item.quantity}</span>
               </div>
               <strong style={{ color: "#211822" }}>
-                ₱{Number(item.unit_price * item.quantity).toLocaleString("en-PH")}
+                {formatPeso((finiteNumber(item.unit_price) ?? 0) * item.quantity)}
               </strong>
             </div>
           ))}
@@ -1856,7 +1892,7 @@ function OrderSuccessModal({
           >
             <span>Total Paid</span>
             <span style={{ color: "#ed2b70", fontSize: "18px" }}>
-              ₱{Number(order.total).toLocaleString("en-PH")}
+              {formatPeso(order.total)}
             </span>
           </div>
         </div>
@@ -1884,11 +1920,246 @@ function OrderSuccessModal({
   )
 }
 
+type GatewaySession = {
+  sessionId: string
+  status: string
+  customerName: string
+  customerEmail: string
+  productName: string
+  quantity: number
+  creditsRequired: number
+  walletBalance: number
+  expiresAt: string
+}
+
+function CustomGatewayPage({
+  sessionId,
+  accessToken,
+  walletBalance,
+  onPaymentComplete,
+  onNavigate,
+}: {
+  sessionId: string
+  accessToken: string | null
+  walletBalance: number | null
+  onPaymentComplete: () => Promise<number | null>
+  onNavigate: (path: string) => void
+}) {
+  const [session, setSession] = useState<GatewaySession | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    let active = true
+    const loadSession = async () => {
+      if (!accessToken) {
+        setError("Your session has expired. Sign in again to continue.")
+        setLoading(false)
+        return
+      }
+      try {
+        const response = await fetch(`${API_BASE}/gateway/sessions/${sessionId}/`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || "Checkout session could not be loaded.")
+        if (active) {
+          setSession(data)
+          if (data.status === "paid") {
+            window.location.assign(`/payment/success?session_id=${encodeURIComponent(sessionId)}`)
+          }
+        }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Checkout session could not be loaded.")
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    loadSession()
+    return () => { active = false }
+  }, [sessionId, accessToken])
+
+  const simulatePayment = async () => {
+    if (!accessToken) return
+    setPaying(true)
+    setError("")
+    try {
+      const response = await fetch(`${API_BASE}/gateway/sessions/${sessionId}/simulate-payment/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Payment could not be completed.")
+      if (data.status !== "paid") throw new Error(data.status === "insufficient_credits" ? "Your balance changed. Add credits before paying." : "This session can no longer be paid.")
+      try {
+        await onPaymentComplete()
+      } catch {
+        setError("Payment succeeded, but the latest wallet balance could not be loaded.")
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1200))
+      onNavigate(`/payment/success?session_id=${encodeURIComponent(sessionId)}`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Payment could not be completed.")
+      setPaying(false)
+    }
+  }
+
+  const expired = session ? new Date(session.expiresAt).getTime() <= Date.now() || session.status === "expired" : false
+  const unavailable = !session || session.status !== "pending" || expired
+
+  return (
+    <main className="payment-shell">
+      <div className="payment-topline"><Brand onClick={() => onNavigate("/")} /><span>SECURE TEST CHECKOUT</span></div>
+      <section className="payment-panel">
+        <div className="payment-panel-heading">
+          <span className="payment-kicker">PIXELPINK GATEWAY</span>
+          <h1>{loading ? "Loading checkout" : expired ? "Session expired" : session?.status === "paid" ? "Payment complete" : session?.status === "failed" ? "Payment failed" : "Confirm your payment"}</h1>
+          <p>Credits are deducted only after the signed payment event is verified.</p>
+        </div>
+        {session && (
+          <div className="payment-summary">
+            <div><span>Name</span><strong>{session.customerName}</strong></div>
+            <div><span>Email</span><strong>{session.customerEmail || "No email on account"}</strong></div>
+            <div><span>Product</span><strong>{session.productName}</strong></div>
+            <div><span>Quantity</span><strong>{session.quantity}</strong></div>
+            <div><span>Available balance</span><strong>{formatCredits(walletBalance ?? session.walletBalance)} credits</strong></div>
+            <div className="payment-total"><span>Total</span><strong>{formatCredits(session.creditsRequired)} credits</strong></div>
+          </div>
+        )}
+        {(error || expired || session?.status === "failed") && (
+          <p className="payment-error" role="alert">{error || (expired ? "This checkout session has expired." : "Payment was not completed.")}</p>
+        )}
+        <button className="payment-action" onClick={simulatePayment} disabled={loading || paying || unavailable || !accessToken}>
+          {paying ? <><span className="payment-spinner" /> Processing payment</> : "Confirm and simulate payment"}
+        </button>
+        <button className="payment-secondary" onClick={() => onNavigate("/")}>Cancel and return to store</button>
+      </section>
+    </main>
+  )
+}
+
+type PaymentOrderSummary = {
+  id: string
+  status: string
+  productName: string
+  quantity: number
+  creditsSpent: number
+  keyDeliveryStatus: "pending" | "sent" | "failed"
+  maskedEmail: string
+}
+
+function PaymentSuccessPage({
+  sessionId,
+  accessToken,
+  walletBalance,
+  onNavigate,
+}: {
+  sessionId: string | null
+  accessToken: string | null
+  walletBalance: number | null
+  onNavigate: (path: string) => void
+}) {
+  const [order, setOrder] = useState<PaymentOrderSummary | null>(null)
+  const [sessionStatus, setSessionStatus] = useState("pending")
+  const [error, setError] = useState("")
+  const [resending, setResending] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    let timer = 0
+    const poll = async () => {
+      if (!sessionId || !accessToken) {
+        setError("Sign in again with the purchasing account to view this order.")
+        return
+      }
+      try {
+        const headers = { Authorization: `Bearer ${accessToken}` }
+        const sessionResponse = await fetch(`${API_BASE}/checkout/${sessionId}/`, { headers })
+        const sessionData = await sessionResponse.json()
+        if (!sessionResponse.ok) throw new Error(sessionData.error || "Order session could not be loaded.")
+        if (active) setSessionStatus(sessionData.status)
+        if (!sessionData.orderId) {
+          if (active && !["failed", "expired", "cancelled"].includes(sessionData.status)) {
+            timer = window.setTimeout(poll, 1200)
+          }
+          return
+        }
+        const orderResponse = await fetch(`${API_BASE}/orders/${sessionData.orderId}/`, { headers })
+        const orderData = await orderResponse.json()
+        if (!orderResponse.ok) throw new Error(orderData.error || "Order status could not be loaded.")
+        if (active) setOrder(orderData)
+        if (active && !["sent", "failed"].includes(orderData.keyDeliveryStatus)) {
+          timer = window.setTimeout(poll, 1200)
+        }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Order status could not be loaded.")
+      }
+    }
+    poll()
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [sessionId, accessToken])
+
+  const resendEmail = async () => {
+    if (!order || !accessToken) return
+    setResending(true)
+    setError("")
+    try {
+      const response = await fetch(`${API_BASE}/orders/${order.id}/resend-key-email/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Email delivery retry failed.")
+      setOrder({ ...order, keyDeliveryStatus: data.keyDeliveryStatus })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Email delivery retry failed.")
+    } finally {
+      setResending(false)
+    }
+  }
+
+  const deliveryStatus = order?.keyDeliveryStatus
+  const paymentFailed = ["failed", "expired", "cancelled"].includes(sessionStatus) && !order
+
+  return (
+    <main className="payment-shell success-shell">
+      <div className="payment-topline"><Brand onClick={() => onNavigate("/")} /><span>ORDER DELIVERY</span></div>
+      <section className="payment-panel success-panel">
+        <span className={`delivery-mark ${deliveryStatus === "sent" ? "sent" : deliveryStatus === "failed" || paymentFailed ? "failed" : "waiting"}`}>
+          {deliveryStatus === "sent" ? <Icon name="check" size={30} /> : <Icon name={paymentFailed ? "x" : "mail"} size={28} />}
+        </span>
+        <span className="payment-kicker">{paymentFailed ? "PAYMENT NOT COMPLETED" : "PAYMENT CONFIRMED"}</span>
+        <h1>{deliveryStatus === "sent" ? "Your key is on its way" : deliveryStatus === "failed" ? "Email delivery failed" : paymentFailed ? "Payment could not be completed" : "Confirming your order"}</h1>
+        {order ? (
+          <div className="success-order-summary">
+            <strong>{order.productName}</strong>
+            <span>Quantity {order.quantity} · {formatCredits(order.creditsSpent)} credits</span>
+          </div>
+        ) : !paymentFailed ? <p>Waiting for the verified payment event.</p> : null}
+        {deliveryStatus === "sent" && <p>Payment successful. Your digital key was emailed to <strong>{order?.maskedEmail}</strong>.</p>}
+        {deliveryStatus === "pending" && <p>The order is paid. Checking the Email API delivery status...</p>}
+        {deliveryStatus === "failed" && <p>The order remains paid. Retry delivery using the same email idempotency key.</p>}
+        {order && <p className="success-balance">Your balance: {walletBalance === null ? "—" : `${formatCredits(walletBalance)} credits`}</p>}
+        {error && <p className="payment-error" role="alert">{error}</p>}
+        {deliveryStatus === "failed" && <button className="payment-action" onClick={resendEmail} disabled={resending}>{resending ? "Retrying delivery..." : "Resend key email"}</button>}
+        <button className="payment-secondary" onClick={() => onNavigate("/")}>Return to store</button>
+      </section>
+    </main>
+  )
+}
+
 /* === Main Application Component === */
 export default function App() {
   const [page, setPage] = useState<Page>("home")
+  const [route, setRoute] = useState(() => `${window.location.pathname}${window.location.search}`)
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [productLoading, setProductLoading] = useState(false)
+  const [productError, setProductError] = useState("")
   const [toast, setToast] = useState("")
 
   // Authentication State
@@ -1901,6 +2172,7 @@ export default function App() {
     }
   })
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem("pixelpink_access_token"))
+  const [walletBalance, setWalletBalance] = useState<number | null>(null)
 
   // Cart state persisted to localStorage
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -1914,6 +2186,30 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [activeOrder, setActiveOrder] = useState<any | null>(null)
+
+  const navigate = (target: string) => {
+    const url = new URL(target, window.location.origin)
+    if (url.origin !== window.location.origin) {
+      window.location.assign(url.href)
+      return
+    }
+    const nextRoute = `${url.pathname}${url.search}${url.hash}`
+    window.history.pushState({}, "", nextRoute)
+    setRoute(nextRoute)
+    if (url.pathname === "/") setPage("home")
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const navigatePage = (nextPage: Page) => {
+    if (route.startsWith("/products/") && nextPage !== "product-detail") navigate("/")
+    setPage(nextPage)
+  }
+
+  useEffect(() => {
+    const handlePopState = () => setRoute(`${window.location.pathname}${window.location.search}`)
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
 
   useEffect(() => {
     localStorage.setItem("pixelpink_cart", JSON.stringify(cart))
@@ -1933,6 +2229,66 @@ export default function App() {
     fetchCatalog()
   }, [])
 
+  const refreshWallet = async (token = accessToken) => {
+    if (!token) {
+      setWalletBalance(null)
+      return null
+    }
+    const response = await fetch(`${API_BASE}/wallet/`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) throw new Error("Wallet balance could not be refreshed.")
+    const data = await response.json()
+    const balance = finiteNumber(data.balance)
+    if (balance === null) throw new Error("Wallet API returned an invalid balance.")
+    setWalletBalance(balance)
+    return balance
+  }
+
+  useEffect(() => {
+    if (!accessToken) {
+      setWalletBalance(null)
+      return
+    }
+    let active = true
+    refreshWallet(accessToken)
+      .catch(() => {
+        if (active) setWalletBalance(null)
+      })
+    return () => { active = false }
+  }, [accessToken])
+
+  const routePath = route.split("?")[0]
+  const productSlug = routePath.match(/^\/products\/([^/]+)\/?$/)?.[1]
+
+  useEffect(() => {
+    if (!productSlug) return
+    setPage("product-detail")
+    setProductError("")
+    const listedProduct = products.find((item) => item.slug === productSlug)
+    if (listedProduct) {
+      setSelectedProduct(listedProduct)
+      setProductLoading(false)
+      return
+    }
+
+    let active = true
+    setProductLoading(true)
+    fetch(`${API_BASE}/products/${encodeURIComponent(productSlug)}/`)
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || "This product could not be found.")
+        if (active) setSelectedProduct(data)
+      })
+      .catch((reason) => {
+        if (active) setProductError(reason instanceof Error ? reason.message : "This product could not be loaded.")
+      })
+      .finally(() => {
+        if (active) setProductLoading(false)
+      })
+    return () => { active = false }
+  }, [productSlug, products])
+
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(""), 3000)
@@ -1949,9 +2305,9 @@ export default function App() {
     }
     showToast(`Welcome back, ${loggedInUser.username}!`)
     if (loggedInUser.is_seller || loggedInUser.role === "vendor") {
-      setPage("seller")
+      navigatePage("seller")
     } else {
-      setPage("store")
+      navigatePage("store")
     }
   }
 
@@ -1964,25 +2320,27 @@ export default function App() {
     localStorage.removeItem("pixelpink_user")
     localStorage.removeItem("pixelpink_access_token")
     showToast("Logged out successfully.")
-    setPage("home")
+    navigatePage("home")
   }
 
   // Auth Guards: If not logged in, clicking product or cart redirects to login
   const handleSelectProduct = (p: Product) => {
     if (!user) {
       showToast("Please log in to view product details and purchase.")
-      setPage("login")
+      navigatePage("login")
       return
     }
     setSelectedProduct(p)
+    setProductError("")
+    setProductLoading(false)
     setPage("product-detail")
-    window.scrollTo({ top: 0, behavior: "smooth" })
+    navigate(`/products/${encodeURIComponent(p.slug)}`)
   }
 
   const handleAddToCart = (product: Product, variant: Variant, quantity = 1) => {
     if (!user) {
       showToast("Please log in to add products to your cart.")
-      setPage("login")
+      navigatePage("login")
       return
     }
 
@@ -2019,31 +2377,26 @@ export default function App() {
     setCart((prev) => prev.filter((item) => item.variant.id !== variantId))
   }
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) return
+  const handleCheckoutItem = async (selectedItem: CartItem) => {
     if (!user) {
       setIsCartOpen(false)
-      setPage("login")
+      navigatePage("login")
       return
     }
     setIsCheckingOut(true)
 
     try {
+      const idempotencyKey = crypto.randomUUID()
       const payload = {
-        items: cart.map((i) => ({
-          variant_id: i.variant.id,
-          quantity: i.quantity,
-        })),
-        email: user.email || "customer@example.com",
-        name: user.username,
-        success_url: window.location.origin + "?checkout_success=true",
-        cancel_url: window.location.origin,
+        productId: selectedItem.variant.id,
+        quantity: selectedItem.quantity,
       }
 
       const res = await fetch(`${API_BASE}/checkout/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify(payload),
@@ -2057,24 +2410,26 @@ export default function App() {
         return
       }
 
-      // Clear cart
-      setCart([])
-      setIsCartOpen(false)
-
-      if (data.checkout_url && !data.checkout_url.includes("mock_session")) {
-        // Redirect to PayMongo Hosted Checkout Page
-        window.location.href = data.checkout_url
-      } else {
-        // Mock / Development mode: fetch created order and show success modal
-        const orderRes = await fetch(`${API_BASE}/orders/${data.order_id}/`)
-        const orderData = await orderRes.json()
-        setActiveOrder(orderData)
+      if (!data.checkoutUrl) {
+        throw new Error("The payment provider did not return a checkout URL.")
       }
+
+      setCart((current) => current.filter((item) => item.variant.id !== selectedItem.variant.id))
+      setIsCartOpen(false)
+      navigate(data.checkoutUrl)
     } catch (e: any) {
       alert("Error initiating checkout: " + e.message)
     } finally {
       setIsCheckingOut(false)
     }
+  }
+
+  const handleCheckout = async () => {
+    if (cart[0]) await handleCheckoutItem(cart[0])
+  }
+
+  const handleBuyNow = async (product: Product, variant: Variant, quantity: number) => {
+    await handleCheckoutItem({ product, variant, quantity })
   }
 
   const handleSimulatePayment = async (orderId: number) => {
@@ -2099,18 +2454,36 @@ export default function App() {
   }
 
   const totalCartCount = cart.reduce((s, i) => s + i.quantity, 0)
+  const customCheckoutSessionId = routePath.match(/^\/pay\/([^/]+)\/?$/)?.[1]
+  const successSessionId = new URLSearchParams(route.split("?")[1] || "").get("session_id")
+
+  if (customCheckoutSessionId) {
+    return (
+      <CustomGatewayPage
+        sessionId={customCheckoutSessionId}
+        accessToken={accessToken}
+        walletBalance={walletBalance}
+        onPaymentComplete={() => refreshWallet()}
+        onNavigate={navigate}
+      />
+    )
+  }
+  if (routePath === "/payment/success") {
+    return <PaymentSuccessPage sessionId={successSessionId} accessToken={accessToken} walletBalance={walletBalance} onNavigate={navigate} />
+  }
 
   return (
     <div className="app">
       <Header
         page={page}
-        setPage={setPage}
+        setPage={navigatePage}
         user={user}
+        walletBalance={walletBalance}
         cartCount={totalCartCount}
         openCart={() => {
           if (!user) {
             showToast("Please log in to access your cart.")
-            setPage("login")
+            navigatePage("login")
           } else {
             setIsCartOpen(true)
           }
@@ -2121,7 +2494,7 @@ export default function App() {
       {page === "home" && (
         <Home
           products={products}
-          setPage={setPage}
+          setPage={navigatePage}
           onSelectProduct={handleSelectProduct}
         />
       )}
@@ -2134,11 +2507,21 @@ export default function App() {
       )}
 
       {page === "product-detail" && selectedProduct && (
-        <ProductDetailPage
-          product={selectedProduct}
-          onAddToCart={handleAddToCart}
-          onBack={() => setPage("store")}
-        />
+        <ProductDetailErrorBoundary key={selectedProduct.slug} onBack={() => navigatePage("store")}>
+          <ProductDetailPage
+            product={selectedProduct}
+            walletBalance={walletBalance}
+            onAddToCart={handleAddToCart}
+            onBuyNow={handleBuyNow}
+            onBack={() => navigatePage("store")}
+          />
+        </ProductDetailErrorBoundary>
+      )}
+      {page === "product-detail" && !selectedProduct && (
+        <main className="product-detail-page">
+          <p role={productError ? "alert" : undefined}>{productError || (productLoading ? "Loading product..." : "Couldn't load this product.")}</p>
+          <button className="text-button" onClick={() => navigatePage("store")}>Back to products</button>
+        </main>
       )}
 
       {page === "seller" && user && (
@@ -2149,7 +2532,7 @@ export default function App() {
         />
       )}
 
-      {page === "orders" && user && <MyOrdersPage user={user} />}
+      {page === "orders" && user && <MyOrdersPage accessToken={accessToken} />}
 
       {page === "login" && <LoginPage onLoginSuccess={handleLoginSuccess} />}
 
@@ -2157,6 +2540,7 @@ export default function App() {
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         cart={cart}
+        walletBalance={walletBalance}
         onUpdateQuantity={updateQuantity}
         onRemoveItem={removeFromCart}
         onCheckout={handleCheckout}
@@ -2173,22 +2557,22 @@ export default function App() {
         <footer>
           <div className="footer-top">
             <div>
-              <Brand onClick={() => setPage("home")} />
+              <Brand onClick={() => navigatePage("home")} />
               <p style={{ color: "#a89aa2", fontSize: "12px", marginTop: "8px" }}>
                 Instant authentic digital codes, prepaid gift cards, and official licenses.
               </p>
             </div>
             <div className="footer-links">
-              <button onClick={() => setPage("store")}>Browse Products</button>
-              <button onClick={() => setPage("home")}>How it works</button>
-              <button onClick={() => setPage("login")}>Account</button>
+              <button onClick={() => navigatePage("store")}>Browse Products</button>
+              <button onClick={() => navigatePage("home")}>How it works</button>
+              <button onClick={() => navigatePage("login")}>Account</button>
             </div>
           </div>
           <div className="footer-bottom">
             <span>© 2025 PixelPink | Digital Storefront. All rights reserved.</span>
             <div>
-              <span>Payment Gateway: <strong>PayMongo Secure</strong></span>
-              <span>Delivery: <strong>Instant Email Delivery</strong></span>
+              <span>Payment: <strong>Wallet credits</strong></span>
+              <span>Delivery: <strong>Email API</strong></span>
             </div>
           </div>
         </footer>

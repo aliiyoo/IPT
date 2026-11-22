@@ -11,7 +11,8 @@ class CategorySerializer(serializers.ModelSerializer):
 class ProductVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
-        fields = ['id', 'sku', 'attributes', 'price', 'stock_count']
+        fields = ['id', 'sku', 'attributes', 'price', 'price_credits', 'stock_count']
+        read_only_fields = ['price_credits']
 
 
 class VendorSerializer(serializers.ModelSerializer):

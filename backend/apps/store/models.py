@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.utils.text import slugify
 
 
@@ -79,10 +80,14 @@ class ProductVariant(models.Model):
     # JSON attributes, e.g. {"platform": "PC", "region": "Global", "edition": "Standard"}
     attributes = models.JSONField(default=dict, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    price_credits = models.PositiveIntegerField(default=1)
     stock_count = models.IntegerField(default=0)
 
     class Meta:
         ordering = ['price']
+        constraints = [
+            models.CheckConstraint(condition=Q(price_credits__gt=0), name='product_variant_credit_price_positive'),
+        ]
 
     def __str__(self):
         attrs = ", ".join(f"{k}: {v}" for k, v in self.attributes.items())
