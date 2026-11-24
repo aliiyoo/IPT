@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -264,59 +265,73 @@ class SimulatePaymentView(APIView):
 class RefundOrderView(APIView):
     """
     POST /api/orders/<id>/refund/
-    Submits or processes refund via PayMongo Refund API.
+    Verifies ownership, enforces the 3-day refund window, returns credits to the
+    user's Wallet, invalidates associated DigitalKeys, and marks the order refunded.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
+        # --- Fetch & ownership check ---
         try:
             order = Order.objects.get(pk=pk)
         except Order.DoesNotExist:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if order.customer != request.user:
+            return Response({'error': 'You do not have permission to refund this order.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # --- Status check ---
+        if order.status not in ('paid', 'fulfilled'):
+            return Response(
+                {'error': 'Only paid or fulfilled orders can be refunded.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # --- 3-day window check ---
+        age = timezone.now() - order.created_at
+        if age.total_seconds() > 72 * 3600:
+            return Response(
+                {'error': 'Refund window expired. Refunds are only allowed within 3 days of purchase.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         reason = request.data.get('reason', 'Customer requested digital key refund')
 
-        # Check eligibility: order must be paid/fulfilled
-        if order.status not in ('paid', 'fulfilled'):
-            return Response({'error': 'Only paid or fulfilled orders can be refunded.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            # --- Return credits to Wallet ---
+            from apps.payments.models import Wallet
+            wallet, _ = Wallet.objects.get_or_create(user=request.user, defaults={'balance': 0})
+            credits_to_return = int(order.total)
+            wallet.balance += credits_to_return
+            wallet.save(update_fields=['balance'])
 
-        # Call PayMongo Refund API if payment_id is present
-        paymongo_refund_id = None
-        if order.paymongo_payment_id:
-            try:
-                paymongo = PayMongoClient()
-                refund_res = paymongo.create_refund(
-                    payment_id=order.paymongo_payment_id,
-                    amount_cents=int(order.total * 100),
-                    reason="requested_by_customer"
+            # --- Invalidate digital keys and log refund requests ---
+            for item in order.items.all():
+                RefundRequest.objects.create(
+                    order_item=item,
+                    reason=reason,
+                    status='refunded',
+                    paymongo_refund_id=None
                 )
-                paymongo_refund_id = refund_res.get('id', 'ref_processed')
-            except Exception as e:
-                logger.error(f"PayMongo refund failed: {e}")
-                # We can still proceed with local status update for demo
-                paymongo_refund_id = f"ref_fallback_{order.id}"
+                # Invalidate keys on the store DigitalKey model
+                for key in item.digital_keys.all():
+                    key.status = 'refunded'
+                    key.save(update_fields=['status'])
 
-        # Update digital keys to refunded
-        for item in order.items.all():
-            RefundRequest.objects.create(
-                order_item=item,
-                reason=reason,
-                status='refunded',
-                paymongo_refund_id=paymongo_refund_id
-            )
-            for key in item.digital_keys.all():
-                key.status = 'refunded'
-                key.save(update_fields=['status'])
+                if item.variant:
+                    item.variant.sync_stock()
 
-            item.variant.sync_stock()
+            # --- Mark order refunded ---
+            order.status = 'refunded'
+            order.save(update_fields=['status', 'updated_at'])
 
-        order.status = 'refunded'
-        order.save(update_fields=['status', 'updated_at'])
+        logger.info(f"Order #{order.id} refunded by user {request.user.username}. {credits_to_return} credits returned.")
 
         return Response({
-            'message': 'Order refunded successfully.',
+            'message': 'Order refunded successfully. Your credits have been returned.',
+            'new_balance': wallet.balance,
             'order': OrderDetailSerializer(order).data
-        })
+        }, status=status.HTTP_200_OK)
 
 
 # --- Vendor (Seller Center) Orders & Sales ---

@@ -1,0 +1,156 @@
+Here is a complete, step-by-step setup guide. You can save this as a `README.md` file in your main `IPT` folder. It contains everything you (or your professor) need to know to run the project from scratch.
+
+***
+
+# PixelPink Digital Storefront — Setup Guide
+
+Welcome to **PixelPink**, a full-stack e-commerce platform for digital goods (game keys, gift cards, and software licenses). This project uses **React (Vite)** for the frontend and **Django + Django REST Framework** for the backend.
+
+## 🛠️ Prerequisites (What to Install)
+
+Before running the project, ensure you have the following installed on your machine:
+1.  **Python** (Version 3.10 or newer) - [Download here](https://www.python.org/downloads/)
+2.  **Node.js** (Version 18 or newer) - [Download here](https://nodejs.org/)
+3.  **Git** (Optional, for version control) - [Download here](https://git-scm.com/)
+
+---
+
+## 📂 Project Structure
+```text
+IPT/
+├── backend/               # Django API Server (Runs on port 8000)
+│   ├── manage.py
+│   ├── requirements.txt
+│   └── venv/              # Python Virtual Environment
+├── frontend/ (or src/)    # React App (Runs on port 8443)
+├── .env.local             # Frontend environment variables
+└── README.md              # This file
+```
+
+---
+
+## 🚀 Step 1: Backend Setup (Django)
+
+1. **Open a terminal** and navigate to the `backend` folder:
+   ```bash
+   cd backend
+   ```
+
+2. **Create and activate a Python virtual environment:**
+   ```bash
+   # Windows
+   python -m venv venv
+   .\venv\Scripts\activate
+   
+   # Mac/Linux
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install the required Python packages:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+   *(If you don't have a requirements.txt, run: `pip install django djangorestframework django-cors-headers python-dotenv requests google-auth`)*
+
+4. **Set up the `.env` file:**
+   Inside the `backend` folder, create a file named `.env` (not `.env.example`) and add the following credentials:
+   ```env
+   # Django Settings
+   DJANGO_SECRET_KEY=pixelpink-dev-secret-key
+   DEBUG=True
+   ALLOWED_HOSTS=localhost,127.0.0.1,*
+
+   # Database (SQLite)
+   DATABASE_ENGINE=sqlite
+
+   # Gmail SMTP (For sending digital keys)
+   EMAIL_HOST_USER=your_email@gmail.com
+   EMAIL_HOST_PASSWORD=your_16_character_app_password
+   DEFAULT_FROM_EMAIL=PixelPink <your_email@gmail.com>
+
+   # Google OAuth (For Login)
+   GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+   # PayMongo (Test Mode)
+   PAYMONGO_SECRET_KEY=
+   PAYMONGO_PUBLIC_KEY=
+   PAYMONGO_WEBHOOK_SECRET=
+
+   # Frontend URL
+   FRONTEND_URL=http://localhost:8443
+   ```
+
+5. **Run Database Migrations and Seed Data:**
+   ```bash
+   python manage.py migrate
+   python manage.py seed  # This populates the database with vendors, products, and demo users
+   ```
+
+6. **Start the Backend Server:**
+   ```bash
+   python manage.py runserver
+   ```
+   *The backend is now running at `http://127.0.0.1:8000/`*
+
+---
+
+## 🎨 Step 2: Frontend Setup (React + Vite)
+
+1. **Open a NEW terminal window** (leave the backend running) and navigate to the main `IPT` folder (where `package.json` is located).
+
+2. **Install Node modules:**
+   ```bash
+   npm install
+   ```
+
+3. **Set up the Frontend `.env.local` file:**
+   In the main `IPT` folder, create a file named `.env.local` and add your Google Client ID:
+   ```env
+   VITE_GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+   ```
+
+4. **Start the Frontend Server:**
+   ```bash
+   npm run dev
+   ```
+   *The website is now running at `http://localhost:8443/`*
+
+---
+
+## 🔑 Step 3: Third-Party API Setup (How to get the Keys)
+
+### 1. Gmail SMTP (For Emailing Digital Keys)
+1. Go to your Google Account settings.
+2. Enable **2-Step Verification**.
+3. Search for **App Passwords**.
+4. Create a new app password (name it "PixelPink").
+5. Copy the 16-character password and put it in `EMAIL_HOST_PASSWORD` in the `.env` file.
+
+### 2. Google OAuth (For "Log in with Google")
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project.
+3. Go to **APIs & Services > OAuth consent screen** and set it up as "External".
+4. Go to **Credentials > Create Credentials > OAuth Client ID**.
+5. Application type: **Web Application**.
+6. **Authorized JavaScript origins:** `http://localhost:8443`
+7. **Authorized redirect URIs:** `http://localhost:8000/`
+8. Copy the Client ID and Client Secret into the `.env` files.
+
+---
+
+## 🧪 Step 4: How to Test the System
+
+1. Open your browser and go to **`http://localhost:8443/`**.
+2. Click **"Continue with Google"** and log in with your Google account.
+3. Browse the store, click on a product, select a variation, and add it to your cart.
+4. Go to the cart and click **Checkout with PayMongo**.
+5. Since PayMongo is in test mode, click **"Simulate Instant Payment (Test)"**.
+6. Look at your **Backend Terminal**. It should say `[SUCCESS] Email sent successfully`.
+7. Check the **Gmail inbox** of the account you logged in with. You should receive an email from PixelPink containing your digital key!
+
+### 👥 Demo Accounts (If you don't use Google Login)
+*   **Customer:** Username: `customer` | Password: `customer123`
+*   **Seller (GameHub):** Username: `gamehub` | Password: `vendor123`
+*   **Admin:** Username: `admin` | Password: `admin123` (Access at `http://127.0.0.1:8000/admin`)

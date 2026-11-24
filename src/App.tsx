@@ -590,8 +590,8 @@ function ProductDetailPage({
                       <span className="variation-btn-price">
                         {formatPeso(v.price)} · {formatCredits(v.price_credits)} credits
                       </span>
-                      <span className="variation-btn-stock">
-                        {v.stock_count > 0 ? `✓ In Stock (${v.stock_count})` : "✓ Available"}
+                      <span className="variation-btn-stock" style={{ color: v.stock_count > 0 ? "#16a34a" : "#dc2626" }}>
+                        {v.stock_count > 0 ? `✓ In Stock (${v.stock_count})` : "✕ Out of Stock"}
                       </span>
                     </button>
                   )
@@ -621,50 +621,70 @@ function ProductDetailPage({
         <div className="buy-box">
           <div className="buy-box-price">{pesoPrice}</div>
           <div className="buy-box-credit-price">{creditsPrice} credits</div>
-          <div className="buy-box-stock-status">
-            <Icon name="check" size={16} /> In Stock - Instant Email Delivery
-          </div>
-          <div className="buy-box-delivery">
-            Delivered to your account email after payment confirmation.
-          </div>
+          {(() => {
+            const isOutOfStock = !activeVariant || (activeVariant.stock_count ?? 0) <= 0
+            const availableQty = activeVariant ? Math.min(activeVariant.stock_count ?? 0, 5) : 0
+            const qtyOptions = availableQty > 0 ? Array.from({ length: availableQty }, (_, i) => i + 1) : [1]
+            return (
+              <>
+                <div className="buy-box-stock-status" style={{ color: isOutOfStock ? '#c0392b' : '#27ae60' }}>
+                  {isOutOfStock ? (
+                    <><Icon name="x" size={16} /> Out of Stock</>
+                  ) : (
+                    <><Icon name="check" size={16} /> In Stock ({activeVariant!.stock_count} available) - Instant Email Delivery</>
+                  )}
+                </div>
+                <div className="buy-box-delivery">
+                  {isOutOfStock
+                    ? 'Currently unavailable. Check back soon.'
+                    : 'Delivered to your account email after payment confirmation.'}
+                </div>
 
-          <div className="buy-box-qty-row">
-            <span>Quantity:</span>
-            <select
-              className="buy-box-qty-select"
-              value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-            >
-              {[1, 2, 3, 4, 5].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
+                <div className="buy-box-qty-row">
+                  <span>Quantity:</span>
+                  <select
+                    className="buy-box-qty-select"
+                    value={quantity}
+                    disabled={isOutOfStock}
+                    onChange={(e) => setQuantity(Number(e.target.value))}
+                  >
+                    {qtyOptions.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="buy-box-actions">
-            <button
-              className="buy-box-btn-cart"
-              onClick={() => {
-                if (activeVariant) {
-                  onAddToCart(product, activeVariant, quantity)
-                }
-              }}
-            >
-              <Icon name="bag" size={18} /> Add to Cart
-            </button>
-            <button
-              className="buy-box-btn-buy"
-              onClick={() => {
-                if (activeVariant) {
-                  onBuyNow(product, activeVariant, quantity)
-                }
-              }}
-            >
-              Buy Now
-            </button>
-          </div>
+                <div className="buy-box-actions">
+                  <button
+                    className="buy-box-btn-cart"
+                    disabled={isOutOfStock}
+                    style={isOutOfStock ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                    onClick={() => {
+                      if (activeVariant && !isOutOfStock) {
+                        onAddToCart(product, activeVariant, quantity)
+                      }
+                    }}
+                  >
+                    <Icon name="bag" size={18} /> {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+                  </button>
+                  <button
+                    className="buy-box-btn-buy"
+                    disabled={isOutOfStock}
+                    style={isOutOfStock ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                    onClick={() => {
+                      if (activeVariant && !isOutOfStock) {
+                        onBuyNow(product, activeVariant, quantity)
+                      }
+                    }}
+                  >
+                    {isOutOfStock ? 'Unavailable' : 'Buy Now'}
+                  </button>
+                </div>
+              </>
+            )
+          })()}
 
           <div className="buy-box-meta">
             <div className="buy-box-meta-row">
@@ -692,17 +712,30 @@ function ProductDetailPage({
 }
 
 /* === Seller Center Dashboard === */
+interface SellerVariantFormItem {
+  id?: number
+  sku?: string
+  name: string
+  price: number
+  stock_count: number
+}
+
 function SellerCenterPage({
   user,
+  accessToken,
   products,
   onRefreshProducts,
 }: {
   user: AuthUser
+  accessToken?: string | null
   products: Product[]
   onRefreshProducts: () => void
 }) {
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [formData, setFormData] = useState({
+  const [showModal, setShowModal] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const defaultFormData = {
     name: "",
     brand: user.vendor?.name || "",
     manufacturer: user.vendor?.name || "",
@@ -713,8 +746,10 @@ function SellerCenterPage({
     variants: [
       { name: "Standard Edition", price: 999, stock_count: 10 },
       { name: "Deluxe Edition", price: 1499, stock_count: 10 },
-    ],
-  })
+    ] as SellerVariantFormItem[],
+  }
+
+  const [formData, setFormData] = useState(defaultFormData)
 
   // Filter products belonging to this seller
   const sellerProducts = useMemo(() => {
@@ -734,16 +769,88 @@ function SellerCenterPage({
     )
   }, [sellerProducts])
 
+  const handleOpenAddModal = () => {
+    setEditingProduct(null)
+    setFormData({
+      name: "",
+      brand: user.vendor?.name || "",
+      manufacturer: user.vendor?.name || "",
+      description: "",
+      base_price: 999,
+      cover_image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80",
+      about_text: "Genuine digital license with instant activation.\nOfficial support and permanent access.",
+      variants: [
+        { name: "Standard Edition", price: 999, stock_count: 10 },
+        { name: "Deluxe Edition", price: 1499, stock_count: 10 },
+      ],
+    })
+    setShowModal(true)
+  }
+
+  const handleOpenEditModal = (p: Product) => {
+    setEditingProduct(p)
+    const existingVariants: SellerVariantFormItem[] =
+      p.variants && p.variants.length > 0
+        ? p.variants.map((v) => ({
+            id: v.id,
+            sku: v.sku,
+            name:
+              v.attributes?.edition ||
+              v.attributes?.platform ||
+              v.attributes?.option ||
+              (v.attributes ? Object.values(v.attributes)[0] : "") ||
+              v.sku ||
+              "Standard Edition",
+            price: Number(v.price) || 0,
+            stock_count: v.stock_count || 0,
+          }))
+        : [{ name: "Standard Edition", price: Number(p.base_price) || 999, stock_count: 10 }]
+
+    const aboutText = Array.isArray(p.about_this_item)
+      ? p.about_this_item.join("\n")
+      : typeof p.about_this_item === "string"
+      ? p.about_this_item
+      : ""
+
+    setFormData({
+      name: p.name,
+      brand: p.brand || user.vendor?.name || "",
+      manufacturer: p.manufacturer || p.brand || user.vendor?.name || "",
+      description: p.description || "",
+      base_price: Number(p.base_price) || 0,
+      cover_image: p.cover_image || "",
+      about_text: aboutText,
+      variants: existingVariants,
+    })
+    setShowModal(true)
+  }
+
   const handleAddVariantRow = () => {
     setFormData((prev) => ({
       ...prev,
-      variants: [...prev.variants, { name: "New Variant", price: 999, stock_count: 10 }],
+      variants: [
+        ...prev.variants,
+        { name: "New Variant", price: prev.base_price || 999, stock_count: 10 },
+      ],
     }))
   }
 
-  const handleCreateProduct = async (e: FormEvent) => {
+  const handleRemoveVariantRow = (index: number) => {
+    if (formData.variants.length <= 1) {
+      alert("A product must have at least one variation.")
+      return
+    }
+    setFormData((prev) => ({
+      ...prev,
+      variants: prev.variants.filter((_, i) => i !== index),
+    }))
+  }
+
+  const handleSaveProduct = async (e: FormEvent) => {
     e.preventDefault()
+    setIsSubmitting(true)
     try {
+      const isEdit = Boolean(editingProduct)
       const payload = {
         name: formData.name,
         brand: formData.brand,
@@ -754,32 +861,71 @@ function SellerCenterPage({
         about_this_item: formData.about_text.split("\n").filter(Boolean),
         username: user.username,
         variants: formData.variants.map((v) => ({
-          sku: `${formData.name.slice(0, 3).toUpperCase()}-${v.name.slice(0, 4).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+          ...(v.id ? { id: v.id } : {}),
+          sku:
+            v.sku ||
+            `${formData.name.slice(0, 3).toUpperCase()}-${v.name.slice(0, 4).toUpperCase()}-${Math.floor(
+              Math.random() * 900 + 100
+            )}`,
           attributes: { edition: v.name },
+          name: v.name,
           price: v.price,
           stock_count: v.stock_count,
         })),
       }
 
-      const res = await fetch(`${API_BASE}/vendor/products/`, {
-        method: "POST",
+      const url = isEdit
+        ? `${API_BASE}/vendor/products/${editingProduct!.id}/`
+        : `${API_BASE}/vendor/products/`
+      const method = isEdit ? "PUT" : "POST"
+
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           "X-Username": user.username,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify(payload),
       })
 
       if (res.ok) {
-        alert("Product and digital keys created successfully!")
-        setShowAddModal(false)
+        alert(isEdit ? "Product updated successfully!" : "Product and digital keys created successfully!")
+        setShowModal(false)
+        setEditingProduct(null)
         onRefreshProducts()
       } else {
-        const err = await res.json()
-        alert(err.error || "Failed to create product.")
+        const err = await res.json().catch(() => ({}))
+        alert(err.error || (isEdit ? "Failed to update product." : "Failed to create product."))
       }
     } catch (err: any) {
       alert("Error: " + err.message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteProduct = async (p: Product) => {
+    const confirmed = window.confirm(`Are you sure you want to delete "${p.name}"? This action cannot be undone.`)
+    if (!confirmed) return
+
+    try {
+      const res = await fetch(`${API_BASE}/vendor/products/${p.id}/`, {
+        method: "DELETE",
+        headers: {
+          "X-Username": user.username,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+      })
+      if (res.ok) {
+        alert(`Product "${p.name}" has been deleted.`)
+        onRefreshProducts()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error || "Failed to delete product.")
+      }
+    } catch (err: any) {
+      alert("Error deleting product: " + err.message)
     }
   }
 
@@ -788,11 +934,11 @@ function SellerCenterPage({
       <div className="seller-header-banner">
         <div className="seller-title-group">
           <h1>Seller Center — {user.vendor?.name || user.username}</h1>
-          <p>Manage your digital catalog, inspect available keys, and add product variations.</p>
+          <p>Manage your digital catalog, inspect available keys, and update product variations.</p>
         </div>
         <button
           className="primary-button"
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           style={{ background: "#ed2b70", border: 0 }}
         >
           <Icon name="plus" size={16} /> Add New Product
@@ -833,61 +979,93 @@ function SellerCenterPage({
               <th>Starting Price</th>
               <th>Total Stock</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {sellerProducts.map((p) => {
-              const stock = p.variants?.reduce((s, v) => s + v.stock_count, 0) || 0
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <div className="seller-table-prod-cell">
-                      <img src={p.cover_image} alt={p.name} className="seller-table-thumb" />
-                      <div>
-                        <strong>{p.name}</strong>
-                        <div style={{ fontSize: "11px", color: "#888" }}>{p.slug}</div>
+            {sellerProducts.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px", color: "#888" }}>
+                  No products in your catalog yet. Click "+ Add New Product" to create your first listing!
+                </td>
+              </tr>
+            ) : (
+              sellerProducts.map((p) => {
+                const stock = p.variants?.reduce((s, v) => s + v.stock_count, 0) || 0
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <div className="seller-table-prod-cell">
+                        <img src={p.cover_image} alt={p.name} className="seller-table-thumb" />
+                        <div>
+                          <strong>{p.name}</strong>
+                          <div style={{ fontSize: "11px", color: "#888" }}>{p.slug}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td>{p.brand || p.vendor?.name}</td>
-                  <td>
-                    <span style={{ fontWeight: 700, color: "#ed2b70" }}>
-                      {p.variants?.length || 0} variations
-                    </span>
-                  </td>
-                  <td>{formatPeso(p.base_price)}</td>
-                  <td>
-                    <span style={{ color: stock > 0 ? "#16a34a" : "#dc2626", fontWeight: "bold" }}>
-                      {stock} keys available
-                    </span>
-                  </td>
-                  <td>
-                    <span style={{ background: "#dcfce7", color: "#16a34a", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold" }}>
-                      ACTIVE
-                    </span>
-                  </td>
-                </tr>
-              )
-            })}
+                    </td>
+                    <td>{p.brand || p.vendor?.name}</td>
+                    <td>
+                      <span style={{ fontWeight: 700, color: "#ed2b70" }}>
+                        {p.variants?.length || 0} variations
+                      </span>
+                    </td>
+                    <td>{formatPeso(p.base_price)}</td>
+                    <td>
+                      <span style={{ color: stock > 0 ? "#16a34a" : "#dc2626", fontWeight: "bold" }}>
+                        {stock} keys available
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ background: "#dcfce7", color: "#16a34a", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold" }}>
+                        ACTIVE
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(p)}
+                          className="seller-btn-edit"
+                          title="Edit product details & variations"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProduct(p)}
+                          className="seller-btn-delete"
+                          title="Delete product"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Add Product Modal */}
-      {showAddModal && (
+      {/* Add / Edit Product Modal */}
+      {showModal && (
         <div className="modal-overlay">
           <div className="seller-modal">
             <div className="seller-modal-header">
-              <h2>Add Product &amp; Variations</h2>
+              <h2>{editingProduct ? `Edit Product: ${editingProduct.name}` : "Add Product & Variations"}</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowModal(false)
+                  setEditingProduct(null)
+                }}
                 style={{ border: 0, background: "none", cursor: "pointer" }}
               >
                 <Icon name="x" size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateProduct} className="seller-form">
+            <form onSubmit={handleSaveProduct} className="seller-form">
               <div className="seller-form-grid">
                 <label>
                   Product Title *
@@ -971,7 +1149,7 @@ function SellerCenterPage({
                 </div>
 
                 {formData.variants.map((v, i) => (
-                  <div key={i} className="variant-row-input">
+                  <div key={i} className="variant-row-input" style={{ position: "relative" }}>
                     <label>
                       Variation Name (e.g. Xbox / Steam / ₱500)
                       <input
@@ -999,7 +1177,7 @@ function SellerCenterPage({
                       />
                     </label>
                     <label>
-                      Keys to Generate
+                      Keys to Generate / Stock
                       <input
                         type="number"
                         required
@@ -1011,6 +1189,27 @@ function SellerCenterPage({
                         }}
                       />
                     </label>
+                    {formData.variants.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveVariantRow(i)}
+                        style={{
+                          background: "#fef2f2",
+                          border: "1px solid #fecaca",
+                          color: "#dc2626",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          alignSelf: "flex-end",
+                          marginBottom: "2px",
+                        }}
+                        title="Remove variation"
+                      >
+                        ✕ Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1019,12 +1218,19 @@ function SellerCenterPage({
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowModal(false)
+                    setEditingProduct(null)
+                  }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="primary-button">
-                  Publish Product &amp; Generate Keys
+                <button type="submit" className="primary-button" disabled={isSubmitting}>
+                  {isSubmitting
+                    ? "Saving..."
+                    : editingProduct
+                    ? "Save Changes"
+                    : "Publish Product & Generate Keys"}
                 </button>
               </div>
             </form>
@@ -1036,10 +1242,17 @@ function SellerCenterPage({
 }
 
 /* === Customer My Orders Page === */
-function MyOrdersPage({ accessToken }: { accessToken: string | null }) {
+function MyOrdersPage({
+  accessToken,
+  setWalletBalance,
+}: {
+  accessToken: string | null
+  setWalletBalance: (balance: number) => void
+}) {
   const [orders, setOrders] = useState<PaymentOrderRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [refundingId, setRefundingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!accessToken) {
@@ -1074,6 +1287,42 @@ function MyOrdersPage({ accessToken }: { accessToken: string | null }) {
     }
   }
 
+  const handleRefund = async (orderId: string) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to refund this order? Your credits will be returned and the digital key will be invalidated."
+    )
+    if (!confirmed || !accessToken) return
+
+    setRefundingId(orderId)
+    setError("")
+    try {
+      const res = await fetch(`${API_BASE}/orders/${orderId}/refund/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Refund request failed.")
+
+      // Update order status in UI
+      setOrders((current) =>
+        current.map((o) =>
+          o.id === orderId ? { ...o, status: "refunded" } : o
+        )
+      )
+      // Update navbar wallet balance immediately
+      if (typeof data.new_balance === "number") {
+        setWalletBalance(data.new_balance)
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Refund request failed.")
+    } finally {
+      setRefundingId(null)
+    }
+  }
+
   return (
     <main className="orders-page">
       <div className="orders-header">
@@ -1096,38 +1345,63 @@ function MyOrdersPage({ accessToken }: { accessToken: string | null }) {
           <p style={{ color: "#666" }}>Your paid orders will appear here.</p>
         </div>
       ) : (
-        orders.map((order) => (
-          <div key={order.id} className="order-card">
-            <div className="order-card-top">
-              <div>
-                <strong>Order {order.id.slice(0, 8)}</strong>
-                <span style={{ color: "#888", marginLeft: "12px" }}>
-                  {new Date(order.createdAt).toLocaleDateString()}
-                </span>
+        orders.map((order) => {
+          const orderDate = new Date(order.createdAt)
+          const ageMs = Date.now() - orderDate.getTime()
+          const withinRefundWindow = ageMs < 72 * 60 * 60 * 1000
+          const canRefund = (order.status === "paid" || order.status === "fulfilled") && withinRefundWindow
+          const refundExpired = (order.status === "paid" || order.status === "fulfilled") && !withinRefundWindow
+
+          return (
+            <div key={order.id} className="order-card">
+              <div className="order-card-top">
+                <div>
+                  <strong>Order {order.id.slice(0, 8)}</strong>
+                  <span style={{ color: "#888", marginLeft: "12px" }}>
+                    {orderDate.toLocaleDateString()}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span className={`order-status-pill ${order.status}`}>{order.status}</span>
+                  <strong style={{ fontSize: "16px", color: "#ed2b70" }}>
+                    {formatCredits(order.creditsSpent)} credits
+                  </strong>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span className={`order-status-pill ${order.status}`}>{order.status}</span>
-                <strong style={{ fontSize: "16px", color: "#ed2b70" }}>
-                  {formatCredits(order.creditsSpent)} credits
-                </strong>
+
+              <div className="payment-order-row">
+                <div>
+                  <strong>{order.productName} × {order.quantity}</strong>
+                  <span>Delivered to {order.maskedEmail || "your account email"}</span>
+                </div>
+                <span className={`delivery-status ${order.keyDeliveryStatus}`}>{order.keyDeliveryStatus}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "12px", marginTop: "14px" }}>
+                {refundExpired && (
+                  <span style={{ fontSize: "12px", color: "#aaa" }}>
+                    Refund window expired (3 days).
+                  </span>
+                )}
+                {canRefund && (
+                  <button
+                    className="payment-retry-button"
+                    style={{ background: "#fff3f7", color: "#c0392b", border: "1px solid #f5a7ba" }}
+                    disabled={refundingId === order.id}
+                    onClick={() => handleRefund(order.id)}
+                  >
+                    {refundingId === order.id ? "Processing..." : "Request Refund"}
+                  </button>
+                )}
+                {order.keyDeliveryStatus === "failed" && (
+                  <button className="payment-retry-button" onClick={() => handleResend(order.id)}>
+                    Resend key email
+                  </button>
+                )}
               </div>
             </div>
-
-            <div className="payment-order-row">
-              <div>
-                <strong>{order.productName} × {order.quantity}</strong>
-                <span>Delivered to {order.maskedEmail || "your account email"}</span>
-              </div>
-              <span className={`delivery-status ${order.keyDeliveryStatus}`}>{order.keyDeliveryStatus}</span>
-            </div>
-
-            {order.keyDeliveryStatus === "failed" && (
-              <div style={{ textAlign: "right", marginTop: "14px" }}>
-                <button className="payment-retry-button" onClick={() => handleResend(order.id)}>Resend key email</button>
-              </div>
-            )}
-          </div>
-        ))
+          )
+        })
       )}
     </main>
   )
@@ -2527,12 +2801,13 @@ export default function App() {
       {page === "seller" && user && (
         <SellerCenterPage
           user={user}
+          accessToken={accessToken}
           products={products}
           onRefreshProducts={fetchCatalog}
         />
       )}
 
-      {page === "orders" && user && <MyOrdersPage accessToken={accessToken} />}
+      {page === "orders" && user && <MyOrdersPage accessToken={accessToken} setWalletBalance={setWalletBalance} />}
 
       {page === "login" && <LoginPage onLoginSuccess={handleLoginSuccess} />}
 

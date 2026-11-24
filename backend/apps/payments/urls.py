@@ -7,6 +7,7 @@ from .views import (
     PaymentOrderDetailView,
     PaymentOrderListView,
     PaymentWebhookView,
+    RefundPaymentOrderView,
     ResendKeyEmailView,
     SimulatePaymentView,
     WalletView,
@@ -22,4 +23,5 @@ urlpatterns = [
     path('orders/', PaymentOrderListView.as_view(), name='payment-order-list'),
     path('orders/<uuid:pk>/', PaymentOrderDetailView.as_view(), name='payment-order-detail'),
     path('orders/<uuid:pk>/resend-key-email/', ResendKeyEmailView.as_view(), name='payment-order-resend-email'),
+    path('orders/<uuid:pk>/refund/', RefundPaymentOrderView.as_view(), name='payment-order-refund'),
 ]

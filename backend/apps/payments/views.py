@@ -66,6 +66,11 @@ class CheckoutView(APIView):
         if variant.price_credits <= 0:
             return Response({'error': 'This product has an invalid credit price.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if variant.stock_count < quantity:
+            return Response({
+                'error': f'Sorry, {variant.product.name} is out of stock.' if variant.stock_count <= 0 else f'Sorry, only {variant.stock_count} keys left in stock.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             session = create_checkout_session(
                 user=request.user,
@@ -259,6 +264,82 @@ class ResendKeyEmailView(APIView):
         result = deliver_key_email(delivery_log)
         response_status = status.HTTP_200_OK if result.status == 'sent' else status.HTTP_502_BAD_GATEWAY
         return Response({'keyDeliveryStatus': result.status}, status=response_status)
+
+
+class RefundPaymentOrderView(APIView):
+    """
+    POST /api/orders/<uuid:pk>/refund/
+    - Verifies the order belongs to the logged-in user.
+    - Verifies status is 'paid'.
+    - Enforces the 3-day (72-hour) refund window.
+    - Returns credits_spent to the user's Wallet.
+    - Marks associated PaymentDigitalKeys as invalidated (deletes delivery record context).
+    - Updates order status to 'refunded'.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, pk):
+        from django.db import transaction as db_transaction
+
+        try:
+            order = PaymentOrder.objects.select_related('session').get(pk=pk, user=request.user)
+        except PaymentOrder.DoesNotExist:
+            return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Status check — only 'paid' orders can be refunded (refunded ones are already processed)
+        if order.status != 'paid':
+            return Response(
+                {'error': 'Only paid orders can be refunded.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3-day window check
+        age = timezone.now() - order.created_at
+        if age.total_seconds() > 72 * 3600:
+            return Response(
+                {'error': 'Refund window expired. Refunds are only allowed within 3 days of purchase.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with db_transaction.atomic():
+            # Return credits to wallet
+            wallet, _ = Wallet.objects.get_or_create(user=request.user, defaults={'balance': 0})
+            wallet.balance += order.credits_spent
+            wallet.save(update_fields=['balance'])
+
+            # Invalidate digital keys: delete them so they cannot be revealed
+            order.digital_keys.all().delete()
+
+            # Mark order refunded
+            order.status = 'refunded'
+            order.save(update_fields=['status'])
+
+            # Mark the checkout session as cancelled so stock is restored
+            if order.session:
+                order.session.status = 'cancelled'
+                order.session.save(update_fields=['status'])
+
+            # Restore stock on the product variant
+            variant = order.product
+            if variant:
+                variant.sync_stock()
+
+        email = request.user.email or ''
+        masked_email = _mask_email(email)
+        return Response({
+            'message': 'Refund processed successfully. Your credits have been returned.',
+            'new_balance': wallet.balance,
+            'order': {
+                'id': str(order.pk),
+                'status': order.status,
+                'productName': order.product.product.name,
+                'quantity': order.quantity,
+                'creditsSpent': order.credits_spent,
+                'maskedEmail': masked_email,
+                'createdAt': order.created_at,
+            }
+        }, status=status.HTTP_200_OK)
 
 
 def _mask_email(email):

@@ -82,8 +82,8 @@ The local payment provider defaults to `CustomProvider`, which simulates the hos
 
 ## 5. Demo Accounts (Fallback)
 
-| Role | Username | Password |
-| --- | --- | --- |
-| Customer | `customer` | `customer123` |
-| Seller | `gamehub` | `vendor123` |
-| Admin | `admin` | `admin123` |
+| Role      | Username  | Password      |
+|-----------|-----------|---------------|
+| Customer  | `customer`| `customer123` |
+| Seller    | `gamehub` | `vendor123`   |
+| Admin     | `admin`   | `admin123`    |

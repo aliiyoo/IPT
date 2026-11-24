@@ -135,7 +135,7 @@ SITE_ID = 1
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'core.authentication.CsrfExemptSessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
@@ -206,6 +206,9 @@ if not GATEWAY_WEBHOOK_SECRET and DEBUG:
 PAYMENT_SESSION_TTL_MINUTES = int(os.getenv('PAYMENT_SESSION_TTL_MINUTES', '30'))
 PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY', '').strip()
 PAYMONGO_WEBHOOK_SECRET = os.getenv('PAYMONGO_WEBHOOK_SECRET', '').strip()
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '').strip()
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '').strip()
+STRIPE_API_VERSION = os.getenv('STRIPE_API_VERSION', '2026-11-18.endive').strip()
 EMAIL_API_BASE_URL = os.getenv('EMAIL_API_BASE_URL', '').strip()
 EMAIL_API_KEY = os.getenv('EMAIL_API_KEY', '').strip()
 DIGITAL_KEY_ENCRYPTION_KEY = os.getenv('DIGITAL_KEY_ENCRYPTION_KEY', '').strip()

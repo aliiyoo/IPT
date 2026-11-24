@@ -994,6 +994,38 @@ footer .brand-mark { width: 33px; height: 33px; }
   object-fit: cover;
   background: #fdf2f6;
 }
+.seller-btn-edit {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #fed7e2;
+  background: #fff5f8;
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.seller-btn-edit:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.seller-btn-delete {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.seller-btn-delete:hover {
+  background: #dc2626;
+  color: white;
+  border-color: #dc2626;
+}
 
 /* Seller Add Product Modal / Form */
 .modal-overlay {

@@ -23,6 +23,7 @@ from .providers import get_payment_provider
 
 PAID_EVENT_TYPES = {'payment.paid', 'checkout_session.payment.paid'}
 FAILED_EVENT_TYPES = {'payment.failed', 'checkout_session.payment.failed'}
+EXPIRED_EVENT_TYPES = {'payment.expired', 'checkout_session.expired'}
 
 
 def create_checkout_session(*, user, variant, quantity, idempotency_key):
@@ -44,6 +45,9 @@ def create_checkout_session(*, user, variant, quantity, idempotency_key):
         raise InsufficientCreditsError('Your wallet does not have enough credits for this purchase.')
 
     now = timezone.now()
+    ttl_minutes = settings.PAYMENT_SESSION_TTL_MINUTES
+    if provider.name == 'stripe':
+        ttl_minutes = max(ttl_minutes, 31)
     session = CheckoutSession.objects.create(
         user=user,
         product=variant,
@@ -51,7 +55,7 @@ def create_checkout_session(*, user, variant, quantity, idempotency_key):
         credits_required=credits_required,
         reference_number=f'ORDER-{secrets.token_hex(6).upper()}',
         provider=provider.name,
-        expires_at=now + timedelta(minutes=settings.PAYMENT_SESSION_TTL_MINUTES),
+        expires_at=now + timedelta(minutes=ttl_minutes),
         idempotency_key=idempotency_key,
         success_url='',
         cancel_url='',
@@ -82,6 +86,9 @@ def _attach_provider_session(session, variant):
             'quantity': str(session.quantity),
             'orderId': str(session.pk),
             'sessionId': str(session.pk),
+            'referenceNumber': session.reference_number,
+            'customerEmail': session.user.email or '',
+            'customerName': session.user.get_full_name() or session.user.username,
         },
     })
     session.provider_session_id = provider_session['providerSessionId']
@@ -138,6 +145,11 @@ def process_payment_webhook(provider_name, raw_body, headers):
                     session.status = 'failed'
                     session.save(update_fields=['status'])
                 outcome = session.status
+            elif event_data.event_type in EXPIRED_EVENT_TYPES:
+                if session.status == 'pending':
+                    session.status = 'expired'
+                    session.save(update_fields=['status'])
+                outcome = session.status
             elif event_data.event_type in PAID_EVENT_TYPES:
                 if session.status != 'pending':
                     outcome = session.status
@@ -190,6 +202,15 @@ def process_payment_webhook(provider_name, raw_body, headers):
                             ref_type='order',
                             ref_id=order.pk,
                         )
+                        # Decrement available digital keys & sync stock on variant
+                        variant = session.product
+                        if variant:
+                            available_keys = list(variant.digital_keys.filter(status='available')[:session.quantity])
+                            for k in available_keys:
+                                k.status = 'revealed'
+                                k.save(update_fields=['status'])
+                            variant.sync_stock()
+
                         session.status = 'paid'
                         session.paid_at = event_data.paid_at or timezone.now()
                         session.save(update_fields=['status', 'paid_at'])

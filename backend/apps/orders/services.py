@@ -34,9 +34,27 @@ def fulfill_order(order, paymongo_payment_id=None):
 
         for item in order.items.select_related('variant', 'variant__product', 'variant__product__vendor').all():
             variant = item.variant
+            if not variant:
+                continue
 
-            # Generate fresh, unique digital keys in XXXX-XXXX-XXXX-XXXX format for each quantity
-            for _ in range(item.quantity):
+            # 1. Claim existing available digital keys for this variant first
+            available_keys = list(variant.digital_keys.filter(status='available')[:item.quantity])
+            for key in available_keys:
+                key.status = 'revealed'
+                key.assigned_order_item = item
+                key.save(update_fields=['status', 'assigned_order_item'])
+
+                fulfillment = Fulfillment.objects.create(
+                    order_item=item,
+                    digital_key=key,
+                    email_sent_at=now,
+                    brevo_message_id="gmail_smtp_dispatch"
+                )
+                created_fulfillments.append(fulfillment)
+
+            # 2. If more keys needed than available in stock, generate remaining
+            remaining_needed = item.quantity - len(available_keys)
+            for _ in range(remaining_needed):
                 code = generate_random_digital_key()
                 while DigitalKey.objects.filter(code=code).exists():
                     code = generate_random_digital_key()
@@ -56,8 +74,8 @@ def fulfill_order(order, paymongo_payment_id=None):
                 )
                 created_fulfillments.append(fulfillment)
 
-            if variant:
-                variant.sync_stock()
+            # 3. Synchronize variant stock count based on remaining available keys
+            variant.sync_stock()
 
         order.status = 'fulfilled'
         order.save(update_fields=['status', 'paymongo_payment_id', 'updated_at'])

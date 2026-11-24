@@ -37,7 +37,7 @@ class CheckoutSession(models.Model):
         ('cancelled', 'Cancelled'),
         ('failed', 'Failed'),
     ]
-    PROVIDER_CHOICES = [('custom', 'Custom'), ('paymongo', 'PayMongo')]
+    PROVIDER_CHOICES = [('custom', 'Custom'), ('paymongo', 'PayMongo'), ('stripe', 'Stripe')]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payment_sessions')
@@ -70,7 +70,7 @@ class CheckoutSession(models.Model):
 
 
 class PaymentOrder(models.Model):
-    STATUS_CHOICES = [('paid', 'Paid')]
+    STATUS_CHOICES = [('paid', 'Paid'), ('refunded', 'Refunded')]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payment_orders')

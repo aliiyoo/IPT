@@ -4,6 +4,9 @@ from decimal import Decimal, ROUND_CEILING
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.authentication import BasicAuthentication
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from core.authentication import CsrfExemptSessionAuthentication
 from django.db.models import Q
 from .models import Vendor, Category, Product, ProductVariant, DigitalKey
 from .serializers import (
@@ -80,6 +83,7 @@ class VendorDetailView(generics.RetrieveAPIView):
 
 # --- Vendor (Seller Center) Endpoints ---
 class VendorProductListCreateView(APIView):
+    authentication_classes = [CsrfExemptSessionAuthentication, BasicAuthentication, JWTAuthentication]
     permission_classes = [permissions.AllowAny]  # We verify user from request.user or custom vendor header/param
 
     def get_vendor(self, request):
@@ -193,17 +197,149 @@ class VendorProductListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+def save_or_update_product_variants(prod, variants_data):
+    """
+    Handles nested variations update:
+    - If variation has an existing id: updates price, attributes, and adjusts digital keys if stock changed.
+    - If variation is new (no id): creates it and generates the required digital keys.
+    - If an existing variation is omitted from variants_data: removes it.
+    """
+    if variants_data is None:
+        return
+
+    submitted_ids = set()
+
+    for v in variants_data:
+        v_id = v.get('id')
+        v_price = v.get('price', prod.base_price)
+        v_stock = int(v.get('stock_count', 10))
+
+        v_name = v.get('name')
+        attrs = v.get('attributes') or {}
+        if v_name:
+            attrs['edition'] = v_name
+        elif not attrs:
+            attrs = {'edition': 'Standard Edition'}
+
+        variant = None
+        if v_id:
+            variant = ProductVariant.objects.filter(id=v_id, product=prod).first()
+
+        if variant:
+            submitted_ids.add(variant.id)
+            variant.price = v_price
+            variant.price_credits = max(1, int(Decimal(str(v_price)).to_integral_value(rounding=ROUND_CEILING)))
+            variant.attributes = attrs
+            if v.get('sku'):
+                variant.sku = v.get('sku')
+            variant.save()
+
+            # Sync stock / digital keys
+            curr_available = variant.digital_keys.filter(status='available').count()
+            if v_stock > curr_available:
+                needed = v_stock - curr_available
+                prefix = variant.sku.split('-')[0][:4].upper()
+                for _ in range(needed):
+                    code = generate_key_code(prefix)
+                    while DigitalKey.objects.filter(code=code).exists():
+                        code = generate_key_code(prefix)
+                    DigitalKey.objects.create(variant=variant, code=code, status='available')
+            elif v_stock < curr_available:
+                to_remove = curr_available - v_stock
+                keys_to_del = variant.digital_keys.filter(status='available')[:to_remove]
+                DigitalKey.objects.filter(id__in=[k.id for k in keys_to_del]).delete()
+
+            variant.sync_stock()
+        else:
+            # Create new variation
+            sku = v.get('sku') or f"{prod.name[:3].upper()}-{random.randint(1000, 9999)}"
+            base_sku = sku
+            while ProductVariant.objects.filter(sku=sku).exists():
+                sku = f"{base_sku}-{random.randint(100, 999)}"
+
+            variant = ProductVariant.objects.create(
+                product=prod,
+                sku=sku,
+                attributes=attrs,
+                price=v_price,
+                price_credits=max(1, int(Decimal(str(v_price)).to_integral_value(rounding=ROUND_CEILING))),
+                stock_count=v_stock
+            )
+            submitted_ids.add(variant.id)
+
+            prefix = sku.split('-')[0][:4].upper()
+            for _ in range(v_stock):
+                code = generate_key_code(prefix)
+                while DigitalKey.objects.filter(code=code).exists():
+                    code = generate_key_code(prefix)
+                DigitalKey.objects.create(variant=variant, code=code, status='available')
+
+            variant.sync_stock()
+
+    # Delete variations belonging to this product that were removed by the seller
+    if submitted_ids:
+        ProductVariant.objects.filter(product=prod).exclude(id__in=submitted_ids).delete()
+
+
 class VendorProductDetailUpdateView(APIView):
+    authentication_classes = [CsrfExemptSessionAuthentication, BasicAuthentication, JWTAuthentication]
     permission_classes = [permissions.AllowAny]
 
-    def put(self, request, pk):
+    def get_object(self, pk):
         try:
-            prod = Product.objects.get(pk=pk)
+            return Product.objects.prefetch_related('variants', 'vendor', 'category').get(pk=pk)
         except Product.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        prod = self.get_object(pk)
+        if not prod:
+            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ProductDetailSerializer(prod).data)
+
+    def put(self, request, pk):
+        return self._update(request, pk)
+
+    def patch(self, request, pk):
+        return self._update(request, pk)
+
+    def _update(self, request, pk):
+        prod = self.get_object(pk)
+        if not prod:
             return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        for field in ['name', 'brand', 'manufacturer', 'description', 'base_price', 'cover_image', 'is_active', 'about_this_item']:
-            if field in request.data:
-                setattr(prod, field, request.data[field])
+        data = request.data
+        for field in ['name', 'brand', 'manufacturer', 'description', 'base_price', 'cover_image', 'is_active']:
+            if field in data:
+                setattr(prod, field, data[field])
+
+        if 'about_this_item' in data:
+            about = data['about_this_item']
+            if isinstance(about, str):
+                about = [line.strip() for line in about.split('\n') if line.strip()]
+            prod.about_this_item = about
+
+        if 'category_id' in data:
+            cat = Category.objects.filter(pk=data['category_id']).first()
+            if cat:
+                prod.category = cat
+
         prod.save()
-        return Response(ProductDetailSerializer(prod).data)
+
+        if 'variants' in data:
+            save_or_update_product_variants(prod, data['variants'])
+
+        prod.refresh_from_db()
+        return Response(ProductDetailSerializer(prod).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        prod = self.get_object(pk)
+        if not prod:
+            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        product_name = prod.name
+        prod.delete()
+        return Response({
+            'message': f"Product '{product_name}' deleted successfully.",
+            'id': pk
+        }, status=status.HTTP_200_OK)

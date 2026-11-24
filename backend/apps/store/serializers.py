@@ -15,6 +15,33 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         read_only_fields = ['price_credits']
 
 
+class ProductVariantWriteSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    name = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = ProductVariant
+        fields = ['id', 'sku', 'attributes', 'price', 'price_credits', 'stock_count', 'name']
+        read_only_fields = ['price_credits']
+        extra_kwargs = {
+            'sku': {'required': False},
+            'price': {'required': False},
+            'stock_count': {'required': False},
+        }
+
+
+class ProductWriteSerializer(serializers.ModelSerializer):
+    variants = ProductVariantWriteSerializer(many=True, required=False)
+
+    class Meta:
+        model = Product
+        fields = [
+            'id', 'name', 'brand', 'manufacturer', 'description', 'about_this_item',
+            'base_price', 'cover_image', 'is_active', 'category', 'variants'
+        ]
+        read_only_fields = ['id']
+
+
 class VendorSerializer(serializers.ModelSerializer):
     product_count = serializers.IntegerField(source='products.count', read_only=True)
 
