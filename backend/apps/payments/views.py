@@ -185,6 +185,12 @@ class SimulatePaymentView(APIView):
             session = CheckoutSession.objects.get(pk=session_id, user=request.user, provider='custom')
         except CheckoutSession.DoesNotExist as exc:
             raise Http404 from exc
+        verified_location = (request.data.get('verifiedLocation') or '').strip()
+        if verified_location:
+            metadata = dict(session.metadata or {})
+            metadata['verifiedLocation'] = verified_location
+            session.metadata = metadata
+            session.save(update_fields=['metadata'])
         try:
             signed_webhook = get_payment_provider().simulate_payment(session.provider_session_id)
         except AlreadyPaidError as exc:

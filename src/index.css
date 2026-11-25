@@ -1039,10 +1039,12 @@ footer .brand-mark { width: 33px; height: 33px; }
   padding: 24px;
 }
 .seller-modal {
-  max-width: 720px;
+  max-width: 740px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
   background: white;
   border-radius: 24px;
   padding: 36px;
@@ -1063,7 +1065,7 @@ footer .brand-mark { width: 33px; height: 33px; }
 }
 .seller-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
 }
 .seller-form-full {
@@ -1073,11 +1075,15 @@ footer .brand-mark { width: 33px; height: 33px; }
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
   color: var(--ink);
 }
 .seller-form input, .seller-form textarea, .seller-form select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 11px 14px;
   border-radius: 10px;
   border: 1px solid var(--line);
@@ -1095,13 +1101,57 @@ footer .brand-mark { width: 33px; height: 33px; }
   background: #fbf7f9;
   border-radius: 16px;
   border: 1px solid #ebdbe2;
+  box-sizing: border-box;
 }
 .variant-row-input {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr auto;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 92px;
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
+}
+.variant-remove-btn {
+  flex-shrink: 0;
+  width: 92px;
+  height: 40px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.variant-remove-btn:hover {
+  background: #fee2e2;
+}
+.seller-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  .seller-modal {
+    padding: 24px 20px;
+  }
+  .seller-form-grid,
+  .variant-row-input {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .variant-remove-btn {
+    width: 100%;
+  }
 }
 
 /* User Account & Orders page */

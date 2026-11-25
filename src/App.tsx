@@ -1,4 +1,17 @@
 import { Component, FormEvent, useMemo, useState, useEffect, useRef } from "react"
+import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet"
+import L from "leaflet"
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png"
+import markerIcon from "leaflet/dist/images/marker-icon.png"
+import markerShadow from "leaflet/dist/images/marker-shadow.png"
+
+// Fix default Leaflet marker icon paths broken by bundlers
+delete (L.Icon.Default.prototype as any)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+})
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api"
 
@@ -1192,29 +1205,18 @@ function SellerCenterPage({
                     {formData.variants.length > 1 && (
                       <button
                         type="button"
+                        className="variant-remove-btn"
                         onClick={() => handleRemoveVariantRow(i)}
-                        style={{
-                          background: "#fef2f2",
-                          border: "1px solid #fecaca",
-                          color: "#dc2626",
-                          padding: "6px 10px",
-                          borderRadius: "6px",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          alignSelf: "flex-end",
-                          marginBottom: "2px",
-                        }}
                         title="Remove variation"
                       >
-                        ✕ Remove
+                        ✕
                       </button>
                     )}
                   </div>
                 ))}
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
+              <div className="seller-modal-footer">
                 <button
                   type="button"
                   className="text-button"
@@ -1769,13 +1771,12 @@ function LoginPage({
               <Icon name="sparkles" size={30} />
             </span>
             <h2>
-              Role-Based
+              PixelPink 
               <br />
-              <em>Access Portal.</em>
+              <em>Digital Store.</em>
             </h2>
             <p>
-              Log in as a <strong>Customer</strong> to shop and view your digital keys, or as a{" "}
-              <strong>Seller</strong> to manage your products and inventory in the Seller Center.
+              Discover top-up gift cards, game keys, and premium software. Securely checkout using credits and receive your digital keys instantly via email. Shop as a <strong>Customer</strong> or <strong>Seller</strong>.
             </p>
           </div>
           <div className="pixel-shape shape-one" />
@@ -1792,7 +1793,7 @@ function LoginPage({
           >
             <span className="kicker">AUTHENTICATION REQUIRED</span>
             <h1>Log in to your account</h1>
-            <p>Choose a demo role below for instant one-click login:</p>
+            <p>Choose a role below for instant login:</p>
 
             {/* Quick Demo Role Logins */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "20px" }}>
@@ -2194,6 +2195,189 @@ function OrderSuccessModal({
   )
 }
 
+/* ===================================================================
+   Billing Address Verifier — Nominatim (OpenStreetMap) + Leaflet
+   =================================================================== */
+
+/** Inner component: once the map mounts, fly to the looked-up coords */
+function MapFlyTo({ lat, lon }: { lat: number; lon: number }) {
+  const map = useMap()
+  useEffect(() => {
+    map.setView([lat, lon], 15)
+  }, [lat, lon, map])
+  return null
+}
+
+interface NominatimAddress {
+  road?: string
+  house_number?: string
+  suburb?: string
+  city?: string
+  town?: string
+  village?: string
+  state?: string
+  region?: string
+  postcode?: string
+  country?: string
+}
+
+interface BillingForm {
+  street: string
+  city: string
+  state: string
+  postcode: string
+  country: string
+  displayName: string
+}
+
+function BillingAddressVerifier({
+  onVerifiedLocationChange,
+}: {
+  onVerifiedLocationChange?: (location: string) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [verifying, setVerifying] = useState(false)
+  const [verifyError, setVerifyError] = useState("")
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null)
+  const [form, setForm] = useState<BillingForm>({
+    street: "", city: "", state: "", postcode: "", country: "", displayName: "",
+  })
+
+  useEffect(() => {
+    const resolved =
+      form.displayName.trim() ||
+      [form.street, form.city, form.state, form.postcode, form.country]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(", ")
+    onVerifiedLocationChange?.(resolved)
+  }, [form, onVerifiedLocationChange])
+
+  const handleVerify = async () => {
+    const q = query.trim()
+    if (!q) return
+    setVerifying(true)
+    setVerifyError("")
+    setCoords(null)
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(q)}`
+      const res = await fetch(url, {
+        headers: { "User-Agent": "PixelPink-Billing/1.0" },
+      })
+      if (!res.ok) throw new Error("Nominatim request failed.")
+      const results = await res.json()
+      if (!Array.isArray(results) || results.length === 0) {
+        setVerifyError("⚠ Couldn't verify this address. Please enter it manually.")
+        return
+      }
+      const hit = results[0]
+      const addr: NominatimAddress = hit.address || {}
+      const street = [addr.house_number, addr.road].filter(Boolean).join(" ")
+      setCoords({ lat: parseFloat(hit.lat), lon: parseFloat(hit.lon) })
+      setForm({
+        street:      street || addr.suburb || "",
+        city:        addr.city || addr.town || addr.village || "",
+        state:       addr.state || addr.region || "",
+        postcode:    addr.postcode || "",
+        country:     addr.country || "",
+        displayName: hit.display_name || "",
+      })
+    } catch {
+      setVerifyError("⚠ Couldn't verify this address. Please enter it manually.")
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  const updateField = (field: keyof BillingForm, value: string) =>
+    setForm((prev) => ({ ...prev, [field]: value }))
+
+  return (
+    <div className="billing-verifier">
+      <h3 className="billing-verifier-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6, verticalAlign: "middle" }}>
+          <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+        </svg>
+        Billing Address Verification
+      </h3>
+
+      {/* Search bar */}
+      <div className="billing-search-row">
+        <input
+          className="billing-search-input"
+          type="text"
+          placeholder="e.g. 1600 Amphitheatre Parkway, Mountain View"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleVerify()}
+          disabled={verifying}
+        />
+        <button
+          className="billing-verify-btn"
+          onClick={handleVerify}
+          disabled={verifying || !query.trim()}
+        >
+          {verifying ? "Verifying…" : "Verify Address"}
+        </button>
+      </div>
+
+      {verifyError && (
+        <p className="billing-verify-error">{verifyError}</p>
+      )}
+
+      {/* Map — only shown after a successful lookup */}
+      {coords && (
+        <div className="billing-map-wrapper">
+          <MapContainer
+            center={[coords.lat, coords.lon]}
+            zoom={15}
+            scrollWheelZoom={false}
+            style={{ height: "220px", width: "100%", borderRadius: "12px" }}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <Marker position={[coords.lat, coords.lon]} />
+            <MapFlyTo lat={coords.lat} lon={coords.lon} />
+          </MapContainer>
+        </div>
+      )}
+
+      {/* Editable address form */}
+      <div className="billing-form-grid">
+        {([
+          ["Street", "street"],
+          ["City", "city"],
+          ["State / Region", "state"],
+          ["Postcode", "postcode"],
+          ["Country", "country"],
+        ] as [string, keyof BillingForm][]).map(([label, key]) => (
+          <label key={key} className="billing-form-field">
+            <span>{label}</span>
+            <input
+              type="text"
+              value={form[key]}
+              onChange={(e) => updateField(key, e.target.value)}
+              placeholder={`Enter ${label.toLowerCase()}`}
+            />
+          </label>
+        ))}
+        <label className="billing-form-field billing-full-address">
+          <span>Full Address (from map)</span>
+          <input
+            type="text"
+            value={form.displayName}
+            readOnly
+            placeholder="Populated after verification"
+            style={{ color: "#888", cursor: "default" }}
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
 type GatewaySession = {
   sessionId: string
   status: string
@@ -2223,6 +2407,7 @@ function CustomGatewayPage({
   const [loading, setLoading] = useState(true)
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState("")
+  const [verifiedLocation, setVerifiedLocation] = useState("")
 
   useEffect(() => {
     let active = true
@@ -2261,7 +2446,11 @@ function CustomGatewayPage({
     try {
       const response = await fetch(`${API_BASE}/gateway/sessions/${sessionId}/simulate-payment/`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ verifiedLocation }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Payment could not be completed.")
@@ -2304,6 +2493,7 @@ function CustomGatewayPage({
         {(error || expired || session?.status === "failed") && (
           <p className="payment-error" role="alert">{error || (expired ? "This checkout session has expired." : "Payment was not completed.")}</p>
         )}
+        <BillingAddressVerifier onVerifiedLocationChange={setVerifiedLocation} />
         <button className="payment-action" onClick={simulatePayment} disabled={loading || paying || unavailable || !accessToken}>
           {paying ? <><span className="payment-spinner" /> Processing payment</> : "Confirm and simulate payment"}
         </button>

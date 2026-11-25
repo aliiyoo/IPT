@@ -9,7 +9,7 @@ from apps.integrations.email_service import send_pixelpink_fulfillment_email
 logger = logging.getLogger(__name__)
 
 
-def fulfill_order(order, paymongo_payment_id=None):
+def fulfill_order(order, paymongo_payment_id=None, verified_location=None):
     """
     Fulfills a paid order:
     1. Generates new unique digital keys in XXXX-XXXX-XXXX-XXXX format using
@@ -82,7 +82,7 @@ def fulfill_order(order, paymongo_payment_id=None):
 
     # Send Gmail SMTP email (fail_silently=False ensures SMTP exceptions are raised)
     try:
-        send_pixelpink_fulfillment_email(order, created_fulfillments)
+        send_pixelpink_fulfillment_email(order, created_fulfillments, verified_location=verified_location)
     except Exception as e:
         logger.error(f"Gmail SMTP email dispatch error for Order #{order.id}: {e}")
         raise e

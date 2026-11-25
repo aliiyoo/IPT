@@ -246,7 +246,12 @@ class SimulatePaymentView(APIView):
     def post(self, request, pk):
         try:
             order = Order.objects.get(pk=pk)
-            fulfill_order(order, paymongo_payment_id=f"pay_simulated_{order.id}")
+            verified_location = (request.data.get('verifiedLocation') or '').strip()
+            fulfill_order(
+                order,
+                paymongo_payment_id=f"pay_simulated_{order.id}",
+                verified_location=verified_location,
+            )
             return Response({
                 'message': 'Order simulated as paid and fulfilled.',
                 'order': OrderDetailSerializer(order).data

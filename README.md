@@ -1,19 +1,36 @@
 # PixelPink E-Commerce
 
-PixelPink is a React/Vite storefront backed by Django REST Framework. Buyers sign in with Google, use wallet credits at checkout, and receive digital keys by email after a simulated payment is confirmed.
+PixelPink is a full-stack digital key storefront built with **React + Vite (TypeScript)** and **Django REST Framework**. Buyers sign in with Google OAuth or standard credentials, verify their billing address on an interactive map, pay using wallet credits at checkout, and receive their digital activation keys via Gmail SMTP.
+
+---
+
+## Features
+
+- **Authentication:** Google OAuth 2.0 (GSI) and username/password login with JWT (`djangorestframework-simplejwt`).
+- **Storefront & Inventory:** Product catalog, search, multi-variant pricing, and automatic stock decrementing upon purchase.
+- **Cart & Credit Wallet:** Persistent shopping cart, credit balance tracking, and idempotent checkout sessions.
+- **Billing Address Verification:** Interactive OpenStreetMap (Nominatim) geocoding and Leaflet map on the payment confirmation screen, included in the email receipt.
+- **Email Delivery:** Transactional HTML receipts with digital keys sent via Python `smtplib` (`SMTP_SSL` port 465 with `STARTTLS` port 587 fallback).
+- **Order History & 3-Day Refund Policy:** Buyers can view orders and request a refund within 72 hours of purchase (returns credits to the wallet, invalidates digital keys, and restores stock).
+- **Seller Center:** Full CRUD management for vendor products and nested variations.
+
+---
 
 ## 1. Prerequisites
 
-- Python 3.10 or newer.
-- Node.js 20.19 or newer (or 22.12 or newer). This project uses Vite 8, which does not support Node 18 even though older Vite versions did.
-- npm, included with Node.js.
-- Google OAuth credentials supplied with the project configuration.
+- **Python** 3.10 or newer
+- **Node.js** 20.19+ or 22.12+ (required by Vite 8)
+- **npm** (included with Node.js)
+- **Google OAuth** Client ID & Secret
+- **Gmail App Password** (for SMTP email delivery)
 
-The local database is SQLite, so no separate database server is required.
+The local database uses **SQLite**, so no separate database server is required.
+
+---
 
 ## 2. Backend Setup
 
-Open PowerShell in the project root and run:
+Open PowerShell in the project root and set up the virtual environment:
 
 ```powershell
 cd backend
@@ -23,30 +40,34 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Verify the supplied backend environment file is present. It contains the project’s Gmail and Google OAuth configuration; do not create or edit it as part of setup.
+### Environment Configuration (`backend/.env`)
 
-```powershell
-Test-Path .env
+Ensure `backend/.env` exists. If setting up from scratch, create `backend/.env` with your own values (never commit real secrets or passwords):
+
+```env
+SECRET_KEY=your-django-secret-key
+DEBUG=True
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-gmail-app-password
 ```
 
-The command should return `True`. If it returns `False`, the provided environment file is missing from this checkout; restore the supplied file before testing Google login or email delivery. Do not put its secret values in this README or share them in logs.
+### Database & Server
 
-Apply the database migrations and load the demo catalog and accounts:
+Apply migrations, seed demo data, and start the Django server:
 
 ```powershell
 python manage.py migrate
 python manage.py seed
-```
-
-> `seed` is intended for a local development database. It resets the product catalog and digital-key inventory.
-
-Start Django on port 8000:
-
-```powershell
 python manage.py runserver
 ```
 
-Keep this terminal running. The API is available at `http://127.0.0.1:8000`.
+> **Note:** `python manage.py seed` is intended for local development and resets the product catalog and digital-key inventory.
+
+Keep this terminal running. The backend API is available at `http://127.0.0.1:8000`.
+
+---
 
 ## 3. Frontend Setup
 
@@ -56,34 +77,41 @@ Open a new PowerShell terminal in the project root:
 npm install
 ```
 
-Verify the supplied frontend environment file exists. It contains the Google Client ID; do not create or edit it during setup.
+### Environment Configuration (`.env.local`)
 
-```powershell
-Test-Path .env.local
+Ensure `.env.local` exists in the project root with your Google Client ID:
+
+```env
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-The command should return `True`. Start the Vite development server:
+Start the Vite development server:
 
 ```powershell
 npm run dev
 ```
 
-Vite runs at `http://localhost:8443` and proxies `/api` requests to Django on port 8000. If the API is hosted elsewhere, set `PAYMENT_API_PROXY_TARGET` for the Vite process to the API origin.
+Vite runs at [http://localhost:8443](http://localhost:8443) and proxies `/api` requests to Django on port `8000`. (If hosting the API elsewhere, set `PAYMENT_API_PROXY_TARGET` to the API origin.)
+
+---
 
 ## 4. How to Test
 
 1. Open [http://localhost:8443](http://localhost:8443).
-2. Select **Log in** and continue with Google. The local origin must be authorized for the project’s Google OAuth client.
-3. Browse the catalog, open a product, then click **Buy Now** or add it to the cart and check out. The payment page displays the signed-in account name, email, and available credits before confirmation. Creating a checkout session does not deduct credits.
-4. Click **Confirm and simulate payment**. The signed webhook processes the payment, deducts credits once, creates the order and digital key, and then attempts email delivery. No real money is charged by the local simulation.
-5. Check the Django terminal for the result and the logged-in account’s inbox for the digital key. Gmail delivery uses Python `smtplib` with SSL on port 465 and STARTTLS fallback on port 587 when the external Email API is not configured. If the Email API is configured, it is tried first; failed delivery can be retried from the order page without another credit deduction.
+2. Click **Log in** and sign in with **Continue with Google** (ensure `http://localhost:8443` is an authorized origin in your Google OAuth client) or use a demo account below.
+3. Browse the catalog, select a product variant, and click **Buy Now** or add it to your cart and proceed to checkout.
+4. On the payment confirmation page, enter an address under **Billing Address Verification** and click **Verify Address** to locate it on the map and populate the billing fields.
+5. Click **Confirm and simulate payment**. Credits are deducted, the digital key is generated/claimed, stock is updated, and an HTML receipt (including the verified billing address and 3-day refund policy) is sent to your account email.
+6. Visit **My Orders** to view your purchase or test **Request Refund** (available for orders within 72 hours of purchase).
+7. Log in as a seller to access the **Seller Center** and test creating, editing, or deleting products and variations.
 
-The local payment provider defaults to `CustomProvider`, which simulates the hosted checkout and webhook. If the supplied backend configuration selects PayMongo, use Test Mode keys only; live keys are rejected by the application.
+---
 
 ## 5. Demo Accounts (Fallback)
 
-| Role      | Username  | Password      |
-|-----------|-----------|---------------|
-| Customer  | `customer`| `customer123` |
-| Seller    | `gamehub` | `vendor123`   |
-| Admin     | `admin`   | `admin123`    |
+| Role     | Username   | Password      |
+|----------|------------|---------------|
+| Customer | `customer` | `customer123` |
+| Seller   | `gamehub`  | `vendor123`   |
+| Seller   | `topup`    | `vendor123`   |
+| Seller   | `codevault`| `vendor123`   |

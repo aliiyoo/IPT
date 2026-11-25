@@ -15,6 +15,7 @@ def send_pixelpink_transactional_email(
     keys,
     order_id,
     credits_spent,
+    verified_location=None,
 ):
     sender_email = settings.EMAIL_HOST_USER.strip()
     app_password = settings.EMAIL_HOST_PASSWORD.strip()
@@ -24,6 +25,8 @@ def send_pixelpink_transactional_email(
     safe_name = escape(to_name or to_email)
     safe_product_name = escape(product_name)
     safe_keys = [escape(key) for key in keys]
+    safe_location = escape(str(verified_location).strip()) if verified_location else ''
+    display_location = safe_location or 'Not provided'
     keys_html = ''.join(
         f"""
         <div style="background:#fff0f5;border:1px solid #ed2b70;border-radius:10px;padding:14px;margin:0 0 14px;">
@@ -41,6 +44,8 @@ def send_pixelpink_transactional_email(
         f'Your PixelPink digital keys for {product_name} are below:\n'
         + '\n'.join(safe_keys)
         + f'\n\nOrder #{order_id} · {credits_spent} credits\n'
+        + f'Verified Billing Address: {verified_location or "Not provided"}\n'
+        + 'Refund Policy: You have 3 days (72 hours) from the time of purchase to request a refund. The refund window closes immediately once the digital key has been revealed.\n\n'
         + 'Thank you for choosing PixelPink!'
     )
     html_body = f"""<!DOCTYPE html>
@@ -66,6 +71,13 @@ def send_pixelpink_transactional_email(
             <p style="margin:0 0 5px;"><strong>Product:</strong> {safe_product_name}</p>
             <p style="margin:0 0 5px;"><strong>Credits charged:</strong> {credits_spent}</p>
             <p style="margin:0;"><strong>Order:</strong> #{order_id}</p>
+        </div>
+        <div style="background:#fff0f5;border:1px solid #f7c6d9;border-radius:10px;padding:12px 16px;margin-top:14px;font-size:13px;line-height:1.5;">
+            <strong style="color:#ed2b70;">&#128205; Verified Billing Address:</strong>
+            <span style="color:#211822;font-weight:600;">{display_location}</span>
+        </div>
+        <div style="background:#f8f7f9;border-left:3px solid #9e95a0;border-radius:6px;padding:12px 14px;margin-top:14px;font-size:12px;line-height:1.6;color:#6b636d;">
+            <strong style="color:#4a434c;">&#9888;&#65039; Refund Policy:</strong> You have 3 days (72 hours) from the time of purchase to request a refund. The refund window closes immediately once the digital key has been revealed.
         </div>
         <div style="margin-top:24px;padding-top:16px;border-top:1px solid #f2e9ed;text-align:center;color:#8b8187;font-size:12px;">
             <p style="margin:0 0 5px;">Thank you for choosing <strong>PixelPink</strong>.</p>
@@ -110,10 +122,12 @@ def send_pixelpink_transactional_email(
             raise RuntimeError('Gmail SMTP delivery failed on ports 465 and 587.') from exc
 
 
-def send_pixelpink_fulfillment_email(order, fulfillments):
+def send_pixelpink_fulfillment_email(order, fulfillments, verified_location=None):
     customer = order.customer
     receiver_email = customer.email if customer else "customer@example.com"
     customer_name = (customer.get_full_name() or customer.username) if customer else "Valued Customer"
+    safe_location = escape(str(verified_location).strip()) if verified_location else ''
+    display_location = safe_location or 'Not provided'
 
     sender_email = os.getenv('EMAIL_HOST_USER', '').strip()
     app_password = os.getenv('EMAIL_HOST_PASSWORD', '').strip()
@@ -164,6 +178,13 @@ def send_pixelpink_fulfillment_email(order, fulfillments):
             <p style="margin: 0 0 6px;"><strong>Status:</strong> Fulfilled</p>
             <p style="margin: 0 0 10px;"><strong>Activation:</strong> Enter each code in its respective platform launcher.</p>
             <p style="margin: 0; font-size: 12px; color: #777;">Need help? Contact the PixelPink support team anytime.</p>
+        </div>
+        <div style="background: #fff0f5; border: 1px solid #f7c6d9; border-radius: 10px; padding: 12px 16px; margin-top: 14px; font-size: 13px; line-height: 1.5;">
+            <strong style="color: #ed2b70;">&#128205; Verified Billing Address:</strong>
+            <span style="color: #211822; font-weight: 600;">{display_location}</span>
+        </div>
+        <div style="background: #f8f7f9; border-left: 3px solid #9e95a0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; font-size: 12px; line-height: 1.6; color: #6b636d;">
+            <strong style="color: #4a434c;">&#9888;&#65039; Refund Policy:</strong> You have 3 days (72 hours) from the time of purchase to request a refund. The refund window closes immediately once the digital key has been revealed.
         </div>
         <div style="text-align: center; margin-top: 32px; border-top: 1px solid #f2e9ed; padding-top: 20px; color: #999; font-size: 12px;">
             <p style="margin: 0 0 4px;">Thank you for choosing <strong>PixelPink</strong>.</p>

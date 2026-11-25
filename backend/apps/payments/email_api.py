@@ -56,6 +56,7 @@ def deliver_key_email(delivery_log):
         elif settings.EMAIL_HOST_USER and settings.EMAIL_HOST_PASSWORD:
             from apps.integrations.email_service import send_pixelpink_transactional_email
 
+            verified_location = (delivery_log.order.session.metadata or {}).get('verifiedLocation', '')
             send_pixelpink_transactional_email(
                 to_email=email,
                 to_name=delivery_log.order.user.get_full_name() or delivery_log.order.user.username,
@@ -64,6 +65,7 @@ def deliver_key_email(delivery_log):
                 keys=raw_keys,
                 order_id=delivery_log.order_id,
                 credits_spent=delivery_log.order.credits_spent,
+                verified_location=verified_location,
             )
         else:
             raise EmailApiError('Email API or Gmail SMTP credentials are required.')
