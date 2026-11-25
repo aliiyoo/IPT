@@ -15,7 +15,7 @@ L.Icon.Default.mergeOptions({
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api"
 
-type Page = "home" | "store" | "product-detail" | "seller" | "orders" | "login"
+type Page = "home" | "store" | "product-detail" | "seller" | "orders" | "login" | "register"
 type IconName =
   | "arrow"
   | "bag"
@@ -1668,16 +1668,18 @@ function StorePage({
   )
 }
 
-/* === Login Page with One-Click Demo Role Selection === */
+/* === Login Page === */
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""
 
 function LoginPage({
   onLoginSuccess,
+  onNavigateRegister,
 }: {
   onLoginSuccess: (user: AuthUser, accessToken?: string) => void
+  onNavigateRegister: () => void
 }) {
-  const [username, setUsername] = useState("customer")
-  const [password, setPassword] = useState("customer123")
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const googleBtnRef = useRef<HTMLDivElement>(null)
@@ -1793,75 +1795,7 @@ function LoginPage({
           >
             <span className="kicker">AUTHENTICATION REQUIRED</span>
             <h1>Log in to your account</h1>
-            <p>Choose a role below for instant login:</p>
-
-            {/* Quick Demo Role Logins */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "20px" }}>
-              <button
-                type="button"
-                onClick={() => handleLogin("customer", "customer123")}
-                style={{
-                  padding: "10px",
-                  border: "1px solid #ebdbe2",
-                  background: "#fff8fa",
-                  borderRadius: "10px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  color: "#ed2b70",
-                  cursor: "pointer",
-                }}
-              >
-                👤 Customer Login
-              </button>
-              <button
-                type="button"
-                onClick={() => handleLogin("gamehub", "vendor123")}
-                style={{
-                  padding: "10px",
-                  border: "1px solid #211822",
-                  background: "#211822",
-                  borderRadius: "10px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                🏪 GameHub Seller
-              </button>
-              <button
-                type="button"
-                onClick={() => handleLogin("topup", "vendor123")}
-                style={{
-                  padding: "10px",
-                  border: "1px solid #211822",
-                  background: "#211822",
-                  borderRadius: "10px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                🏪 TopUp Seller
-              </button>
-              <button
-                type="button"
-                onClick={() => handleLogin("codevault", "vendor123")}
-                style={{
-                  padding: "10px",
-                  border: "1px solid #211822",
-                  background: "#211822",
-                  borderRadius: "10px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                🏪 CodeVault Seller
-              </button>
-            </div>
+            <p>Sign in to access your digital vault and orders.</p>
 
             {error && (
               <div style={{ color: "#dc2626", fontSize: "12px", marginBottom: "12px", background: "#fef2f2", padding: "8px", borderRadius: "8px" }}>
@@ -1915,6 +1849,229 @@ function LoginPage({
                 <div ref={googleBtnRef} style={{ width: "100%" }} />
               </>
             )}
+
+            <p style={{ textAlign: "center", marginTop: "20px", fontSize: "13px", color: "#716871" }}>
+              Don&apos;t have an account?{" "}
+              <button
+                type="button"
+                onClick={onNavigateRegister}
+                style={{
+                  border: 0,
+                  background: "none",
+                  color: "#ed2b70",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 0,
+                  fontSize: "13px",
+                }}
+              >
+                Sign Up
+              </button>
+            </p>
+          </form>
+        </div>
+      </div>
+    </main>
+  )
+}
+
+/* === Register Page === */
+function RegisterPage({
+  onRegisterSuccess,
+  onNavigateLogin,
+}: {
+  onRegisterSuccess: (user: AuthUser, accessToken?: string) => void
+  onNavigateLogin: () => void
+}) {
+  const [username, setUsername] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [role, setRole] = useState<"customer" | "vendor">("customer")
+  const [storeName, setStoreName] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
+
+  const handleRegister = async (e: FormEvent) => {
+    e.preventDefault()
+    setError("")
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.")
+      return
+    }
+    if (role === "vendor" && !storeName.trim()) {
+      setError("Store Name is required for Seller accounts.")
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/auth/register/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: username.trim(),
+          email: email.trim(),
+          password,
+          role,
+          ...(role === "vendor" ? { store_name: storeName.trim() } : {}),
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.user) {
+        onRegisterSuccess(data.user, data.access)
+      } else {
+        const firstErr =
+          data.error ||
+          data.detail ||
+          (typeof data === "object"
+            ? Object.values(data).flat().join(" ")
+            : "Registration failed.")
+        setError(String(firstErr))
+      }
+    } catch (err: any) {
+      setError("Network error: " + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <div className="login-panel">
+        <div className="login-art">
+          <div className="login-brand">
+            <Brand onClick={() => {}} />
+          </div>
+          <div className="login-art-content">
+            <span className="login-spark">
+              <Icon name="sparkles" size={30} />
+            </span>
+            <h2>
+              Join
+              <br />
+              <em>PixelPink.</em>
+            </h2>
+            <p>
+              Create a <strong>Customer</strong> account to buy instant digital keys with wallet credits, or register as a <strong>Seller</strong> to launch your own storefront.
+            </p>
+          </div>
+          <div className="pixel-shape shape-one" />
+          <div className="pixel-shape shape-two" />
+        </div>
+
+        <div className="login-form-wrap">
+          <form className="login-form" onSubmit={handleRegister}>
+            <span className="kicker">CREATE ACCOUNT</span>
+            <h1>Sign up for PixelPink</h1>
+            <p>Fill in your details below to get started.</p>
+
+            {error && (
+              <div style={{ color: "#dc2626", fontSize: "12px", marginBottom: "12px", background: "#fef2f2", padding: "8px", borderRadius: "8px" }}>
+                {error}
+              </div>
+            )}
+
+            <label>
+              Username
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Choose a username"
+                required
+              />
+            </label>
+
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                minLength={6}
+                required
+              />
+            </label>
+
+            <label>
+              Confirm Password
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter your password"
+                minLength={6}
+                required
+              />
+            </label>
+
+            <label>
+              Account Role
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as "customer" | "vendor")}
+                style={{
+                  padding: "11px 14px",
+                  borderRadius: "10px",
+                  border: "1px solid #eadfe4",
+                  background: "#fffcfd",
+                  fontSize: "13px",
+                }}
+              >
+                <option value="customer">Customer</option>
+                <option value="vendor">Seller</option>
+              </select>
+            </label>
+
+            {role === "vendor" && (
+              <label>
+                Store Name
+                <input
+                  type="text"
+                  value={storeName}
+                  onChange={(e) => setStoreName(e.target.value)}
+                  placeholder="e.g. PixelVault Keys"
+                  required
+                />
+              </label>
+            )}
+
+            <button className="submit-button" type="submit" disabled={loading}>
+              {loading ? "Creating Account..." : "Create Account"} <Icon name="arrow" size={18} />
+            </button>
+
+            <p style={{ textAlign: "center", marginTop: "20px", fontSize: "13px", color: "#716871" }}>
+              Already have an account?{" "}
+              <button
+                type="button"
+                onClick={onNavigateLogin}
+                style={{
+                  border: 0,
+                  background: "none",
+                  color: "#ed2b70",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 0,
+                  fontSize: "13px",
+                }}
+              >
+                Log In
+              </button>
+            </p>
           </form>
         </div>
       </div>
@@ -2999,7 +3156,19 @@ export default function App() {
 
       {page === "orders" && user && <MyOrdersPage accessToken={accessToken} setWalletBalance={setWalletBalance} />}
 
-      {page === "login" && <LoginPage onLoginSuccess={handleLoginSuccess} />}
+      {page === "login" && (
+        <LoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onNavigateRegister={() => navigatePage("register")}
+        />
+      )}
+
+      {page === "register" && (
+        <RegisterPage
+          onRegisterSuccess={handleLoginSuccess}
+          onNavigateLogin={() => navigatePage("login")}
+        />
+      )}
 
       <CartDrawer
         isOpen={isCartOpen}
@@ -3018,7 +3187,7 @@ export default function App() {
         onSimulatePay={handleSimulatePayment}
       />
 
-      {page !== "login" && (
+      {page !== "login" && page !== "register" && (
         <footer>
           <div className="footer-top">
             <div>

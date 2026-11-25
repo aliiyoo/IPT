@@ -14,8 +14,22 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            login(request, user)
-            return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            user_data = UserSerializer(user).data
+            role = user.profile.role if hasattr(user, 'profile') else 'customer'
+            user_data['role'] = role
+            user_data['is_seller'] = role in ('vendor', 'seller')
+            if hasattr(user, 'profile') and user.profile.vendor:
+                user_data['vendor'] = {
+                    'id': user.profile.vendor.id,
+                    'name': user.profile.vendor.name,
+                    'slug': user.profile.vendor.slug,
+                }
+            return Response({
+                'message': 'Registration successful',
+                'user': user_data,
+                **get_tokens_for_user(user),
+            }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
